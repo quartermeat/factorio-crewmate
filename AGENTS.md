@@ -15,6 +15,15 @@ going; this file is how to work on it.
 - `bridge/` — one Go package, stdlib only. `rcon.go` is the protocol, `game.go`
   the call convention, `mcp.go` the tool surface, `main.go` the CLI.
 
+## The shape of the thing
+
+Work belongs in scripted loops, not in a model's context. A directive runs from a
+data file through the mod's own tick handler; nothing calls out to an agent to
+decide the next step. When something goes wrong the runner stops, records why, and
+says so in chat -- that is the point at which a person or an agent is worth
+involving. Adding a feature that needs a model in the loop to work at all is
+going the wrong way.
+
 ## Rules that matter
 
 - Keep the body fair: no cheat mode, no indestructible flag, no conjuring items,
@@ -23,6 +32,10 @@ going; this file is how to work on it.
 - Every interface call returns `{ok, result}` or `{ok=false, error}`.
 - A game-side failure is a tool result flagged `isError`, never a protocol error:
   the model should read the message and act on it.
+- Directives are data. A new goal should be a new file in `directives/`, not new
+  Lua. If it cannot be expressed in the existing verbs, add a verb.
+- Layout belongs in blueprint strings, which the game generates and validates.
+  Hand-written coordinates do not survive rotation or fluid alignment.
 - New tools need a description that says what the answer is good for, not just
   what the function is called.
 

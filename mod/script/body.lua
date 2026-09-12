@@ -72,12 +72,60 @@ function Body.ensure(force)
   return Body.spawn(surface, position, force or game.forces.player)
 end
 
+-- Ask the game's own pathfinder rather than steering blind. Straight-line
+-- steering walks a companion into the first lake or cliff it meets and then
+-- stands there sidestepping, which is no use in a loop that is supposed to run
+-- without anyone watching it.
 function Body.walk_to(position)
   local state = crew()
-  state.goal = {x = position.x, y = position.y}
+  local body = Body.get()
+  if not body then return end
+
+  local goal = {x = position.x, y = position.y}
+  local same_goal = state.goal and state.goal.x == goal.x and state.goal.y == goal.y
+  if same_goal and (state.path or state.path_request) then
+    return -- already heading there, with a path or one on the way
+  end
+  -- A failed request must not turn into one request per tick; walking carries on
+  -- in a straight line in the meantime either way.
+  if same_goal and state.path_asked and game.tick - state.path_asked < 180 then
+    return
+  end
+
+  state.goal = goal
   state.follow = nil
-  state.stuck_since = nil
+  if not same_goal then
+    state.stuck_since = nil
+    state.path = nil
+    state.path_step = nil
+  end
+  state.path_asked = game.tick
+  state.path_request = body.surface.request_path
+  {
+    bounding_box = {{-0.2, -0.2}, {0.2, 0.2}},
+    collision_mask = prototypes.entity["character"].collision_mask,
+    start = body.position,
+    goal = goal,
+    force = body.force,
+    -- Generous: a shoreline goal is often a tile the character cannot stand on,
+    -- and a path that ends near it is exactly as useful.
+    radius = 6,
+    pathfind_flags = {cache = false, prefer_straight_paths = true, low_priority = false},
+    path_resolution_modifier = -1,
+  }
 end
+
+script.on_event(defines.events.on_script_path_request_finished, function(event)
+  local state = crew()
+  if state.path_request ~= event.id then return end
+  state.path_request = nil
+  if event.try_again_later then
+    state.path = nil -- the tick handler falls back to steering straight at it
+    return
+  end
+  state.path = event.path
+  state.path_step = 1
+end)
 
 function Body.follow(player)
   local state = crew()
@@ -125,6 +173,23 @@ local function distance(a, b)
   return math.sqrt(dx * dx + dy * dy)
 end
 
+-- While a path is in hand the immediate target is the next waypoint on it.
+local function waypoint(state, body)
+  if not state.path then return nil end
+  local step = state.path[state.path_step]
+  if not step then
+    state.path = nil
+    state.path_step = nil
+    return nil
+  end
+  local dx, dy = body.position.x - step.position.x, body.position.y - step.position.y
+  if math.sqrt(dx * dx + dy * dy) <= 1 then
+    state.path_step = state.path_step + 1
+    return waypoint(state, body)
+  end
+  return step.position
+end
+
 local function target_of(state)
   if state.follow then
     local player = game.get_player(state.follow)
@@ -140,6 +205,15 @@ end
 
 local function step(state, body)
   local target, gap, surface = target_of(state)
+  if target and state.goal and target == state.goal then
+    -- Walking to a fixed goal: follow the path if one came back, and only fall
+    -- back to pointing the body at the goal if the pathfinder had nothing.
+    local next_position = waypoint(state, body)
+    if next_position then
+      body.walking_state = {walking = true, direction = heading(body.position, next_position)}
+      return
+    end
+  end
   if not target then
     body.walking_state = {walking = false}
     return
@@ -151,6 +225,8 @@ local function step(state, body)
   if distance(body.position, target) <= gap then
     body.walking_state = {walking = false}
     state.goal = nil
+    state.path = nil
+    state.path_step = nil
     state.stuck_since = nil
     return
   end

@@ -3,4 +3,6 @@
 -- remote interface in script/api.lua.
 require("script.body")
 require("script.senses")
+require("script.hands")
+require("script.plan")
 require("script.api")

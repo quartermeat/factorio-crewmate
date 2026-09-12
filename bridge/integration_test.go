@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,61 +21,7 @@ func TestIntegrationBodyLivesInTheGame(t *testing.T) {
 	if os.Getenv("CREWMATE_INTEGRATION") == "" {
 		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
 	}
-	factorio := *executable
-	if _, err := os.Stat(factorio); err != nil {
-		t.Skipf("no Factorio at %s", factorio)
-	}
-
-	work := t.TempDir()
-	mods := filepath.Join(work, "mods")
-	if err := os.MkdirAll(mods, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	source, err := filepath.Abs("../mod")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(source, filepath.Join(mods, "crewmate")); err != nil {
-		t.Fatal(err)
-	}
-
-	config := filepath.Join(work, "config.ini")
-	contents := fmt.Sprintf("[path]\nread-data=__PATH__executable__/../../data\nwrite-data=%s\n", work)
-	if err := os.WriteFile(config, []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	save := filepath.Join(work, "test.zip")
-	create := exec.Command(factorio, "--create", save, "--config", config, "--mod-directory", mods)
-	if output, err := create.CombinedOutput(); err != nil {
-		t.Fatalf("map creation failed: %v\n%s", err, output)
-	}
-
-	port := freePort(t)
-	settings := filepath.Join(work, "server-settings.json")
-	if err := os.WriteFile(settings, serverSettings(), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	server := exec.Command(factorio,
-		"--start-server", save,
-		"--config", config,
-		"--mod-directory", mods,
-		"--server-settings", settings,
-		"--rcon-port", port,
-		"--rcon-password", "integration",
-	)
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		server.Process.Kill()
-		server.Wait()
-	})
-
-	address := "127.0.0.1:" + port
-	client := waitForRCON(t, address, "integration")
-	defer client.Close()
-	game := &Game{client: client}
+	game := hostTestWorld(t)
 
 	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
 		t.Fatalf("spawn: %v", err)
@@ -136,6 +83,75 @@ func TestIntegrationBodyLivesInTheGame(t *testing.T) {
 	t.Logf("walked to x=20, saw %d kinds of thing nearby, chat buffer %s", len(seen.Counts), heard)
 }
 
+// Spin up a throwaway world with the mod loaded, and hand back a connection to
+// it. Everything lives in a temp directory, so this never touches ~/.factorio.
+func hostTestWorld(t *testing.T) *Game {
+	t.Helper()
+	factorio := *executable
+	if _, err := os.Stat(factorio); err != nil {
+		t.Skipf("no Factorio at %s", factorio)
+	}
+
+	work := t.TempDir()
+	mods := filepath.Join(work, "mods")
+	if err := os.MkdirAll(mods, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source, err := filepath.Abs("../mod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, filepath.Join(mods, "crewmate")); err != nil {
+		t.Fatal(err)
+	}
+
+	config := filepath.Join(work, "config.ini")
+	contents := fmt.Sprintf("[path]\nread-data=__PATH__executable__/../../data\nwrite-data=%s\n", work)
+	if err := os.WriteFile(config, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fixed seed: otherwise every run gets a different coastline, and a
+	// directive that needs a reachable shore passes or fails by luck.
+	mapGen := filepath.Join(work, "map-gen-settings.json")
+	if err := os.WriteFile(mapGen, []byte(`{"seed": 20260912}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	save := filepath.Join(work, "test.zip")
+	create := exec.Command(factorio, "--create", save, "--config", config, "--mod-directory", mods,
+		"--map-gen-settings", mapGen)
+	if output, err := create.CombinedOutput(); err != nil {
+		t.Fatalf("map creation failed: %v\n%s", err, output)
+	}
+
+	port := freePort(t)
+	settings := filepath.Join(work, "server-settings.json")
+	if err := os.WriteFile(settings, serverSettings(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := exec.Command(factorio,
+		"--start-server", save,
+		"--config", config,
+		"--mod-directory", mods,
+		"--server-settings", settings,
+		"--port", freePort(t),
+		"--rcon-port", port,
+		"--rcon-password", "integration",
+	)
+	if err := server.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		server.Process.Kill()
+		server.Wait()
+	})
+
+	client := waitForRCON(t, "127.0.0.1:"+port, "integration")
+	t.Cleanup(func() { client.Close() })
+	return &Game{client: client}
+}
+
 func freePort(t *testing.T) string {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -159,4 +175,103 @@ func waitForRCON(t *testing.T, address, password string) *RCON {
 	}
 	t.Fatal("server never opened its RCON port")
 	return nil
+}
+
+// The whole point of the project, end to end: a directive written in a file, a
+// shore found in a generated world, and a power block standing there afterwards
+// that the companion built by hand out of its own pockets.
+func TestIntegrationDirectiveBuildsPowerBlock(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	// A player would hand these over or the companion would craft them. Cheating
+	// them in is a test shortcut, and the only one here.
+	supply := `/sc local b = remote.call("crewmate", "carrying") local body = game.surfaces.nauvis.find_entities_filtered{name="character"}[1] ` +
+		`body.insert{name="offshore-pump", count=1} body.insert{name="boiler", count=1} body.insert{name="steam-engine", count=3} ` +
+		`body.insert{name="medium-electric-pole", count=3} body.insert{name="coal", count=200} rcon.print("supplied")`
+	if reply, err := game.client.Exec(supply); err != nil || !strings.Contains(reply, "supplied") {
+		t.Fatalf("could not supply the body: %v %q", err, reply)
+	}
+
+	directives, err := LoadDirectives("../directives")
+	if err != nil {
+		t.Fatal(err)
+	}
+	power, found := directives["coal-to-power"]
+	if !found {
+		t.Fatal("coal-to-power directive is missing")
+	}
+
+	spot, err := power.FindAnchor(game, nil)
+	if err != nil {
+		t.Fatalf("finding a shore: %v", err)
+	}
+	payload, err := power.Compile(spot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := game.Call("run_plan", payload); err != nil {
+		t.Fatalf("run_plan: %v", err)
+	}
+
+	deadline := time.Now().Add(4 * time.Minute)
+	var status struct {
+		State string `json:"state"`
+		Step  int    `json:"step"`
+		Steps int    `json:"steps"`
+		Error string `json:"error"`
+	}
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		raw, err := game.Call("plan_status", nil)
+		if err != nil {
+			t.Fatalf("plan_status: %v", err)
+		}
+		if err := json.Unmarshal(raw, &status); err != nil {
+			t.Fatalf("plan_status shape: %s", raw)
+		}
+		if status.State != "running" {
+			break
+		}
+	}
+	if status.State != "done" {
+		t.Fatalf("directive did not finish: state=%s step=%d/%d error=%s", status.State, status.Step, status.Steps, status.Error)
+	}
+
+	// What matters is the world, not the log: the block must be standing, and the
+	// boiler must be burning what it was given.
+	check := fmt.Sprintf(`/sc local s = game.surfaces.nauvis local area = {{%f, %f}, {%f, %f}} `+
+		`local engines = s.count_entities_filtered{area=area, name="steam-engine"} `+
+		`local boiler = s.find_entities_filtered{area=area, name="boiler"}[1] `+
+		`local poles = s.count_entities_filtered{area=area, name="medium-electric-pole"} `+
+		`local fuel = boiler and boiler.get_fuel_inventory() and boiler.get_fuel_inventory().get_item_count("coal") or 0 `+
+		`rcon.print(helpers.table_to_json{engines=engines, poles=poles, coal=fuel, steam=(boiler and boiler.fluidbox[2] and boiler.fluidbox[2].amount or 0)})`,
+		spot.Position.X-40, spot.Position.Y-40, spot.Position.X+40, spot.Position.Y+40)
+
+	raw, err := game.client.Exec(check)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var built struct {
+		Engines int     `json:"engines"`
+		Poles   int     `json:"poles"`
+		Coal    int     `json:"coal"`
+		Steam   float64 `json:"steam"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &built); err != nil {
+		t.Fatalf("check reply: %s", raw)
+	}
+	if built.Engines != 3 || built.Poles != 3 {
+		t.Fatalf("the block is incomplete: %d engines, %d poles", built.Engines, built.Poles)
+	}
+	if built.Coal == 0 {
+		t.Fatal("the boiler was never fuelled")
+	}
+	t.Logf("built %d engines, %d poles, boiler holding %d coal, steam %.0f", built.Engines, built.Poles, built.Coal, built.Steam)
 }

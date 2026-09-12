@@ -71,6 +71,67 @@ you managing two mod sets.
     bridge/crewmate call walk_to '{"x":120,"y":-40}'
     bridge/crewmate exec "/sc rcon.print(game.tick)"
 
+## Directives
+
+A directive is a goal written down as data: what to build, what sort of site it
+needs, what it costs, and the steps to get there. `directives/coal-to-power.json`
+is the worked example -- an offshore pump, a boiler and three steam engines on the
+nearest shore, with the boiler loaded.
+
+    bridge/crewmate directive list
+    bridge/crewmate directive show coal-to-power
+    bridge/crewmate directive run coal-to-power '{"coal": 200}'
+
+Nothing about running one involves a language model. The bridge finds a site, the
+mod carries the steps out on its own clock, and an agent is only worth involving
+when the companion stops and says why. That is the intended shape of the whole
+project: **scripted loops do the work; the model is the fallback, not the engine.**
+
+### What a directive looks like
+
+```json
+{
+  "name": "coal-to-power",
+  "anchor": {"find": "pump_spot", "radius": 64,
+             "describe": "a stretch of shore an offshore pump will fit on"},
+  "blueprint": "0eNqV...",
+  "align": "offshore-pump",
+  "parameters": {"coal": {"default": 100}},
+  "supplies": [{"name": "coal", "count": "$coal"}],
+  "steps": [
+    {"do": "say", "message": "Found a shore..."},
+    {"do": "stamp", "at": "anchor", "align": "offshore-pump", "radius": 24},
+    {"do": "build_ghosts"},
+    {"do": "insert", "into": "boiler", "item": "coal", "count": "$coal"}
+  ]
+}
+```
+
+Layout comes from a **blueprint string**, because Factorio already solves geometry
+and fluid alignment and nothing hand-written will match it. Positions in steps are
+avoided where possible: `insert` names an entity (`"into": "boiler"`) and the mod
+finds the one it just built.
+
+The verbs are `say`, `goto`, `stamp`, `build_ghosts`, `insert`, `place`,
+`connect` and `wait`. The mod cannot read files -- Factorio gives runtime scripts
+no way to -- so the bridge compiles a directive into absolute steps and hands the
+whole thing over in one call.
+
+### Things learned the hard way
+
+- `create_entities_from_blueprint_string` **only works in menu simulations**, and
+  returns nothing useful. Ghosts are placed individually instead, positioned
+  relative to the directive's anchor entity, which also removes any question of
+  where the game would have centred the blueprint.
+- Build the **far end of a site first**. Nearest-first walls the body in behind
+  its own machines -- a row of steam engines is as solid as a fence -- and it
+  cannot reach the last few ghosts.
+- A ghost the body genuinely cannot get to is set aside, not allowed to wedge the
+  directive: the step finishes with what got built and says what did not.
+- Walking uses the game's pathfinder, with a generous goal radius: shoreline goals
+  are often tiles a character cannot stand on, and a path that ends near one is
+  just as good.
+
 ## Iterating
 
 Mods cannot be reloaded live in multiplayer — `game.reload_mods()` is documented
@@ -97,14 +158,17 @@ too, but this mod has no data stage, so that rarely comes up.
 - **v0.2 — senses worth trusting.** Status, surroundings, chat both ways,
   screenshots, and a test suite that runs the whole thing against a real game.
   *Done.*
-- **v0.3 — hands.** Build, mine, craft and haul, limited to its reach and its own
-  inventory, ghosts first so you see what it intends before it happens.
-- **v0.4 — a sense of place.** Remembers the base: named areas, what it built,
+- **v0.3 — iteration.** A watch mode that restarts the server on every mod edit,
+  since multiplayer cannot reload mods live. *Done.*
+- **v0.4 — hands and directives.** Goals defined in data files, carried out
+  unsupervised: reach-limited building from its own inventory, ghosts first.
+  *Done.*
+- **v0.5 — a sense of place.** Remembers the base: named areas, what it built,
   what it was asked to leave alone.
-- **v0.5 — initiative.** Standing orders it acts on — keep turrets fed, fix the
+- **v0.6 — initiative.** Standing orders it acts on — keep turrets fed, fix the
   brownout, extend the smelter row — and the judgement to ask first when a job is
   bigger than the order.
-- **v0.6 — manners.** An audit log of every action, per-player permissions, and an
+- **v0.7 — manners.** An audit log of every action, per-player permissions, and an
   undo that actually works.
 
 ## Testing

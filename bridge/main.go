@@ -11,12 +11,14 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
 
-const version = "0.3.0"
+const version = "0.4.0"
 
 var (
 	address    = flag.String("rcon", "127.0.0.1:27015", "address of the game's RCON port")
@@ -26,6 +28,8 @@ var (
 	data       = flag.String("data", filepath.Join(home(), ".local/share/factorio-crewmate"), "write-data directory for the hosted server")
 	mods       = flag.String("mods", filepath.Join(home(), ".factorio/mods"), "mod directory the server loads")
 	watch      = flag.String("watch", "", "directory to watch; when a file changes, save and restart the server so mod edits take effect")
+	gamePort   = flag.Int("port", 34197, "UDP port the game itself listens on; change it to host a second world")
+	directives = flag.String("directives", defaultDirectives(), "directory of directive files")
 )
 
 func home() string {
@@ -39,6 +43,15 @@ func home() string {
 // Password order: flag, environment, then the file setup.py writes. The file
 // fallback is what lets the MCP registration be a bare command with no secret in
 // it -- Claude Code stores that config in the clear.
+// Directives ship with the repo; the binary sits in bridge/ inside it.
+func defaultDirectives() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return "directives"
+	}
+	return filepath.Join(filepath.Dir(executable), "..", "directives")
+}
+
 func secret() string {
 	if *password != "" {
 		return *password
@@ -64,6 +77,9 @@ func usage() {
   crewmate serve          host the save as a server with RCON open, so a client can join it
   crewmate serve -watch mod   the same, restarting on every mod edit
   crewmate mcp            run as an MCP server on stdio, for Claude Code to drive
+  crewmate directive list     what the companion knows how to build
+  crewmate directive show <name>   its steps and what it would cost
+  crewmate directive run <name> [json]   carry it out; json overrides parameters
   crewmate call <fn> [json]   one remote call against the running game, for poking at it by hand
   crewmate exec <command>     one raw console command, for the same reason
 
@@ -113,6 +129,8 @@ func main() {
 		err = serve()
 	case "mcp":
 		err = withGame(ServeMCP)
+	case "directive":
+		err = directive(argument(0), argument(1), argument(2))
 	case "call":
 		err = call(argument(0), argument(1))
 	case "exec":
@@ -159,6 +177,76 @@ func call(function, argument string) error {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(pretty)
+	})
+}
+
+func directive(action, name, overrides string) error {
+	known, err := LoadDirectives(*directives)
+	if err != nil {
+		return err
+	}
+
+	switch action {
+	case "", "list":
+		names := make([]string, 0, len(known))
+		for name := range known {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Println(known[name].Summary())
+		}
+		return nil
+	case "show", "run":
+	default:
+		return fmt.Errorf("directive list, show <name>, or run <name>")
+	}
+
+	chosen, found := known[name]
+	if !found {
+		return fmt.Errorf("no directive called %q", name)
+	}
+	parameters := map[string]float64{}
+	if overrides != "" {
+		if err := json.Unmarshal([]byte(overrides), &parameters); err != nil {
+			return fmt.Errorf("parameters are not JSON numbers: %w", err)
+		}
+	}
+
+	if action == "show" {
+		fmt.Printf("%s\n%s\n\n", chosen.Title, chosen.Description)
+		for index, step := range chosen.Steps {
+			verb, _ := step["do"].(string)
+			fmt.Printf("  %d. %s\n", index+1, verb)
+		}
+		return nil
+	}
+
+	return withGame(func(game *Game) error {
+		spot, err := chosen.FindAnchor(game, nil)
+		if err != nil {
+			return err
+		}
+		payload, err := chosen.Compile(spot, parameters)
+		if err != nil {
+			return err
+		}
+		if chosen.Blueprint != "" {
+			raw, err := game.Call("blueprint_needs", map[string]any{
+				"blueprint": chosen.Blueprint,
+				"supplies":  payload["requires"],
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("cost: %s\n", raw)
+		}
+		result, err := game.Call("run_plan", payload)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("started: %s\n", result)
+		return nil
 	})
 }
 
@@ -219,6 +307,7 @@ func serve() error {
 		"--mod-directory", *mods,
 		"--server-settings", settings,
 		"--rcon-port", port,
+		"--port", strconv.Itoa(*gamePort),
 		"--rcon-password", secret(),
 	}
 	start := func() (*exec.Cmd, error) {

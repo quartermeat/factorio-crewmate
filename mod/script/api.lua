@@ -3,6 +3,8 @@
 
 local Body = require("script.body")
 local Senses = require("script.senses")
+local Hands = require("script.hands")
+local Plan = require("script.plan")
 
 local function ok(value)
   return helpers.table_to_json({ok = true, result = value or {}})
@@ -74,6 +76,84 @@ local interface =
   halt = guarded(function()
     Body.halt()
     return ok({stopped = true})
+  end),
+
+  -- Directives arrive compiled by the bridge: the mod never reads files, because
+  -- a Factorio mod cannot.
+  run_plan = guarded(function(argument)
+    local plan, err = Plan.start(argument)
+    if not plan then return fail(err) end
+    return ok({name = plan.name, steps = #plan.steps})
+  end),
+
+  plan_status = guarded(function()
+    return ok(Plan.status())
+  end),
+
+  cancel_plan = guarded(function()
+    return ok({cancelled = Plan.cancel()})
+  end),
+
+  -- What a directive would cost, before starting it: the blueprint's own bill of
+  -- materials, checked against what the body is carrying.
+  blueprint_needs = guarded(function(argument)
+    local body = Body.get()
+    if not body then return fail("no body in the world") end
+    local needs, err = Hands.blueprint_cost(argument.blueprint)
+    if not needs then return fail(err) end
+    for _, extra in pairs(argument.supplies or {}) do
+      needs[#needs + 1] = extra
+    end
+    return ok({needs = needs, missing = Hands.missing(body, needs)})
+  end),
+
+  -- Where an offshore pump could actually go near a point: water edges are the
+  -- one thing a directive cannot assume.
+  pump_spots = guarded(function(argument)
+    local body = Body.get()
+    local surface = body and body.surface or game.surfaces.nauvis
+    local centre = argument.position or (body and body.position) or {x = 0, y = 0}
+    local radius = math.min(argument.radius or 48, 128)
+    local force = game.forces.player
+
+    local spots = {}
+    for x = centre.x - radius, centre.x + radius, 1 do
+      for y = centre.y - radius, centre.y + radius, 1 do
+        for _, direction in pairs({defines.direction.north, defines.direction.east,
+                                   defines.direction.south, defines.direction.west}) do
+          if #spots < (argument.limit or 8) and surface.can_place_entity
+          {
+            name = "offshore-pump", position = {x = x, y = y}, direction = direction,
+            force = force, build_check_type = defines.build_check_type.manual,
+          } then
+            -- can_place_entity answers for the snapped position, not the one it
+            -- was asked about: a pump sits on half tiles. Put a ghost down to
+            -- find out where the game actually means, then take it away again.
+            local ghost = surface.create_entity
+            {
+              name = "entity-ghost", inner_name = "offshore-pump",
+              position = {x = x, y = y}, direction = direction, force = force,
+            }
+            if ghost then
+              spots[#spots + 1] = {position = {x = ghost.position.x, y = ghost.position.y}, direction = direction}
+              ghost.destroy()
+            end
+          end
+        end
+      end
+    end
+    return ok({spots = spots, searched = centre, radius = radius})
+  end),
+
+  carrying = guarded(function()
+    local body = Body.get()
+    if not body then return fail("no body in the world") end
+    local inventory = body.get_main_inventory()
+    local carried = {}
+    for _, item in pairs(inventory and inventory.get_contents() or {}) do
+      carried[#carried + 1] = {name = item.name, count = item.count}
+    end
+    return ok({carrying = carried, reach = body.build_distance})
   end),
 
   screenshot = guarded(function(argument)

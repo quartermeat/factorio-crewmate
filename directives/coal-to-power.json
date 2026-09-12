@@ -1,0 +1,50 @@
+{
+  "name": "coal-to-power",
+  "title": "Coal to electric power loop",
+  "description": "An offshore pump, a boiler and three steam engines on the nearest shore, wired along a pole line, with the boiler loaded with coal. Roughly 2.7 MW once it is burning.",
+  "anchor": {
+    "find": "pump_spot",
+    "near": "player",
+    "radius": 64,
+    "describe": "a stretch of shore an offshore pump will fit on"
+  },
+  "blueprint": "0eNqV082OgyAQAOBXaeY8NiuKVa99DNNs/Jl2SRCM4nYb47vv6KYetjatFwIMfMwQGKDQPTWtMg7SAVRpTQdpNkCnLibX05zJa4IUOkd57ZG5KEMwIihT0Q+k/nhCIOOUU/S3cx7cPk1fF9TyArwLNVWqZ0JT6VpVeo3VBAiN7XizNdNZDIZ7iXCDVMR7OY744ImNXvLCCzZ6/qsEQ1y9sqeFBh/sIFSq5XPncLiiyjfVZJMavan625I9LGxhleaZRzB+wvlixYsXz57P3ZdtyWv6ullj73mK/3A8PdQrj6dXmvkoUaA8YcYtBtzjqHJUTzkvPwJB5wXxL4CjzfXO2V1jr3M539R2MysjkYRJIuMwOnAzjr8SuRMq",
+  "align": "offshore-pump",
+  "parameters": {
+    "coal": {
+      "default": 100,
+      "description": "coal to load into the boiler"
+    }
+  },
+  "supplies": [
+    {
+      "name": "coal",
+      "count": "$coal"
+    }
+  ],
+  "steps": [
+    {
+      "do": "say",
+      "message": "Found a shore. Building a coal power block -- shout if it is in the way."
+    },
+    {
+      "do": "stamp",
+      "at": "anchor",
+      "align": "offshore-pump",
+      "radius": 24
+    },
+    {
+      "do": "build_ghosts"
+    },
+    {
+      "do": "insert",
+      "into": "boiler",
+      "item": "coal",
+      "count": "$coal"
+    },
+    {
+      "do": "say",
+      "message": "Power block is up and burning. Run a pole line from it when you want it."
+    }
+  ]
+}

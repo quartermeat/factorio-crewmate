@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 )
 
 // A minimal MCP server over stdio: initialize, tools/list, tools/call. Nothing
@@ -37,6 +38,8 @@ type Tool struct {
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
 	Call        string         `json:"-"`
+	// Tools that are more than one call into the game carry their own handler.
+	Handler func(*Game, map[string]any) (string, error) `json:"-"`
 }
 
 func object(properties map[string]any, required ...string) map[string]any {
@@ -106,6 +109,41 @@ func tools() []Tool {
 			Description: "Stop walking and stand still.",
 			InputSchema: object(map[string]any{}),
 			Call:        "halt",
+		},
+		{
+			Name: "directive_list",
+			Description: "Standing directives the companion knows how to carry out: named jobs defined in files, " +
+				"each with its own parameters. Nothing runs until one is started.",
+			InputSchema: object(map[string]any{}),
+			Handler:     listDirectives,
+		},
+		{
+			Name: "directive_run",
+			Description: "Set a directive going. The companion finds a site, marks the layout out as ghosts and builds it " +
+				"from what it is carrying, without further instruction. Returns immediately; watch it with plan_status.",
+			InputSchema: object(map[string]any{
+				"name":       text("directive name, as listed by directive_list"),
+				"parameters": map[string]any{"type": "object", "description": "overrides for the directive's parameters"},
+			}, "name"),
+			Handler: runDirective,
+		},
+		{
+			Name:        "plan_status",
+			Description: "How the current directive is going: which step, what it has built so far, and why it stopped if it did.",
+			InputSchema: object(map[string]any{}),
+			Call:        "plan_status",
+		},
+		{
+			Name:        "plan_cancel",
+			Description: "Stop the directive the companion is carrying out. Anything already built stays built.",
+			InputSchema: object(map[string]any{}),
+			Call:        "cancel_plan",
+		},
+		{
+			Name:        "crew_carrying",
+			Description: "What the companion has in its pockets, and how far it can reach. Directives fail when it is short of materials.",
+			InputSchema: object(map[string]any{}),
+			Call:        "carrying",
 		},
 		{
 			Name:        "crew_screenshot",
@@ -185,7 +223,15 @@ func (m *MCP) callTool(message request) {
 		if tool.Name != params.Name {
 			continue
 		}
-		result, err := m.game.Call(tool.Call, params.Arguments)
+		var result string
+		var err error
+		if tool.Handler != nil {
+			result, err = tool.Handler(m.game, params.Arguments)
+		} else {
+			var raw json.RawMessage
+			raw, err = m.game.Call(tool.Call, params.Arguments)
+			result = string(raw)
+		}
 		if err != nil {
 			m.reply(message.ID, map[string]any{
 				"content": []any{map[string]any{"type": "text", "text": err.Error()}},
@@ -194,9 +240,76 @@ func (m *MCP) callTool(message request) {
 			return
 		}
 		m.reply(message.ID, map[string]any{
-			"content": []any{map[string]any{"type": "text", "text": string(result)}},
+			"content": []any{map[string]any{"type": "text", "text": result}},
 		})
 		return
 	}
 	m.fail(message.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
+}
+
+// Directives need the files as well as the game, so they run out here rather
+// than as a single call into the mod.
+func listDirectives(_ *Game, _ map[string]any) (string, error) {
+	known, err := LoadDirectives(*directives)
+	if err != nil {
+		return "", err
+	}
+	listed := make([]map[string]any, 0, len(known))
+	for _, directive := range known {
+		parameters := map[string]any{}
+		for name, parameter := range directive.Parameters {
+			parameters[name] = parameter.Default
+		}
+		listed = append(listed, map[string]any{
+			"name":        directive.Name,
+			"title":       directive.Title,
+			"description": directive.Description,
+			"parameters":  parameters,
+			"needs_site":  directive.Anchor.Describe,
+		})
+	}
+	sort.Slice(listed, func(a, b int) bool {
+		return listed[a]["name"].(string) < listed[b]["name"].(string)
+	})
+	encoded, err := json.Marshal(map[string]any{"directives": listed})
+	return string(encoded), err
+}
+
+func runDirective(game *Game, arguments map[string]any) (string, error) {
+	name, _ := arguments["name"].(string)
+	known, err := LoadDirectives(*directives)
+	if err != nil {
+		return "", err
+	}
+	chosen, found := known[name]
+	if !found {
+		return "", fmt.Errorf("no directive called %q", name)
+	}
+
+	overrides := map[string]float64{}
+	if raw, given := arguments["parameters"].(map[string]any); given {
+		for key, value := range raw {
+			if number, ok := value.(float64); ok {
+				overrides[key] = number
+			}
+		}
+	}
+
+	spot, err := chosen.FindAnchor(game, nil)
+	if err != nil {
+		return "", err
+	}
+	payload, err := chosen.Compile(spot, overrides)
+	if err != nil {
+		return "", err
+	}
+	started, err := game.Call("run_plan", payload)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(map[string]any{
+		"started": json.RawMessage(started),
+		"site":    spot,
+	})
+	return string(encoded), err
 }
