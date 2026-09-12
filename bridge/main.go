@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -15,7 +16,7 @@ import (
 	"time"
 )
 
-const version = "0.2.1"
+const version = "0.3.0"
 
 var (
 	address    = flag.String("rcon", "127.0.0.1:27015", "address of the game's RCON port")
@@ -24,6 +25,7 @@ var (
 	executable = flag.String("factorio", filepath.Join(home(), ".steam/steam/steamapps/common/Factorio/bin/x64/factorio"), "factorio executable")
 	data       = flag.String("data", filepath.Join(home(), ".local/share/factorio-crewmate"), "write-data directory for the hosted server")
 	mods       = flag.String("mods", filepath.Join(home(), ".factorio/mods"), "mod directory the server loads")
+	watch      = flag.String("watch", "", "directory to watch; when a file changes, save and restart the server so mod edits take effect")
 )
 
 func home() string {
@@ -60,6 +62,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `crewmate %s -- a bridge between an agent and a running Factorio game.
 
   crewmate serve          host the save as a server with RCON open, so a client can join it
+  crewmate serve -watch mod   the same, restarting on every mod edit
   crewmate mcp            run as an MCP server on stdio, for Claude Code to drive
   crewmate call <fn> [json]   one remote call against the running game, for poking at it by hand
   crewmate exec <command>     one raw console command, for the same reason
@@ -218,10 +221,15 @@ func serve() error {
 		"--rcon-port", port,
 		"--rcon-password", secret(),
 	}
-	game := exec.Command(*executable, arguments...)
-	game.Stdout = os.Stdout
-	game.Stderr = os.Stderr
-	if err := game.Start(); err != nil {
+	start := func() (*exec.Cmd, error) {
+		game := exec.Command(*executable, arguments...)
+		game.Stdout = os.Stdout
+		game.Stderr = os.Stderr
+		return game, game.Start()
+	}
+
+	game, err := start()
+	if err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "crewmate: hosting %s, rcon on %s; join at 127.0.0.1\n", filepath.Base(*save), *address)
@@ -229,14 +237,100 @@ func serve() error {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	done := make(chan error, 1)
+	watching := watchDirectory(*watch)
 	go func() { done <- game.Wait() }()
+
+	for {
+		select {
+		case <-stop:
+			return shutdown(game, done)
+		case err := <-done:
+			return err
+		case changed := <-watching:
+			// Mods cannot be reloaded live in multiplayer -- reload_mods is
+			// documented as doing nothing there, and it does -- so picking up an
+			// edit means saving and bouncing the server. Clients reconnect.
+			fmt.Fprintf(os.Stderr, "crewmate: %s changed; saving and restarting\n", changed)
+			if client, err := Dial(*address, secret(), 2*time.Second); err == nil {
+				client.Exec("/server-save")
+				client.Close()
+			}
+			shutdown(game, done)
+			waitForPort(*address)
+			game, err = start()
+			if err != nil {
+				return err
+			}
+			go func() { done <- game.Wait() }()
+			fmt.Fprintln(os.Stderr, "crewmate: back up")
+		}
+	}
+}
+
+// A detached headless server ignores SIGINT -- its stdin is already at EOF, and
+// it sits in a half-quit state accepting RCON connections it never answers --
+// so shutdown asks politely with SIGTERM and stops asking after fifteen seconds.
+func shutdown(game *exec.Cmd, done <-chan error) error {
+	game.Process.Signal(syscall.SIGTERM)
 	select {
-	case <-stop:
-		game.Process.Signal(syscall.SIGINT)
-		return <-done
 	case err := <-done:
 		return err
+	case <-time.After(15 * time.Second):
+		fmt.Fprintln(os.Stderr, "crewmate: server did not stop; killing it")
+		game.Process.Kill()
+		return <-done
 	}
+}
+
+// The replacement cannot bind while the old socket is still held.
+func waitForPort(address string) {
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		listener, err := net.Listen("tcp", address)
+		if err == nil {
+			listener.Close()
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// Polled rather than inotify-driven: one dependency-free goroutine, and a second
+// of latency is nothing next to the restart it triggers.
+func watchDirectory(directory string) <-chan string {
+	changes := make(chan string)
+	if directory == "" {
+		return changes
+	}
+	go func() {
+		previous := snapshot(directory)
+		for range time.Tick(time.Second) {
+			current := snapshot(directory)
+			for path, modified := range current {
+				if was, seen := previous[path]; !seen || !was.Equal(modified) {
+					previous = current
+					changes <- filepath.Base(path)
+					break
+				}
+			}
+			previous = current
+		}
+	}()
+	return changes
+}
+
+func snapshot(directory string) map[string]time.Time {
+	files := map[string]time.Time{}
+	filepath.WalkDir(directory, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		if info, err := entry.Info(); err == nil {
+			files[path] = info.ModTime()
+		}
+		return nil
+	})
+	return files
 }
 
 func serverSettings() []byte {

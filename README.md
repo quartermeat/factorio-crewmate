@@ -71,6 +71,26 @@ you managing two mod sets.
     bridge/crewmate call walk_to '{"x":120,"y":-40}'
     bridge/crewmate exec "/sc rcon.print(game.tick)"
 
+## Iterating
+
+Mods cannot be reloaded live in multiplayer — `game.reload_mods()` is documented
+as doing nothing there, and measurably does nothing — so picking up an edit means
+bouncing the server. That is cheaper than it sounds: save, stop, start and ready
+again measures about **1.6 seconds** on a small world. Connected clients drop to
+the menu and reconnect.
+
+    bridge/crewmate serve -save <save> -watch mod
+
+watches the mod directory and does the whole cycle itself on every edit. Leave
+`-watch` off when someone is actually playing, or their game bounces every time
+you touch a file.
+
+Bridge changes are a rebuild (`go build -o crewmate .`); the MCP server is
+started by Claude Code, so a rebuilt binary needs a reconnect on that side.
+
+Data-stage changes — `info.json`, prototypes — need a full restart of the client
+too, but this mod has no data stage, so that rarely comes up.
+
 ## Where this is going
 
 - **v0.1 — a body.** Spawns, walks, follows, dies and comes back. *Done.*

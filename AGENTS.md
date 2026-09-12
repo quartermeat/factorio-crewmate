@@ -35,6 +35,11 @@ The integration test creates its own map, mod directory and server in a temp
 directory, so it can run while you are playing. Everything else is fast and
 needs no game.
 
+Iterating on mod code means restarting the server (~1.6s); `serve -watch mod`
+automates it. Stop a headless server with SIGTERM, never SIGINT: with stdin at
+EOF it takes SIGINT into a half-quit state where it answers RCON connections but
+never replies, and then ignores SIGTERM too.
+
 For poking at a live game by hand, `crewmate call <fn> '<json>'` and
 `crewmate exec '<console command>'`.
 
