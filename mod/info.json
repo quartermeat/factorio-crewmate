@@ -1,0 +1,9 @@
+{
+  "name": "crewmate",
+  "version": "0.1.0",
+  "title": "Crewmate",
+  "author": "quartermeat",
+  "factorio_version": "2.0",
+  "description": "Gives an agent a body in the world: a character it can walk around, plus senses it can report on over RCON.",
+  "dependencies": ["base >= 2.0"]
+}
