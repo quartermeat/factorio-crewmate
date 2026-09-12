@@ -12,7 +12,12 @@ import (
 // the mod parses, which keeps Lua quoting to a single escaped literal instead of
 // a different hand-built expression per call.
 type Game struct {
-	client *RCON
+	client console
+}
+
+// Narrow enough that tests can stand in for a whole game.
+type console interface {
+	Exec(command string) (string, error)
 }
 
 type Reply struct {
@@ -66,5 +71,42 @@ func (g *Game) Call(function string, argument any) (json.RawMessage, error) {
 	if !reply.OK {
 		return nil, fmt.Errorf("%s", reply.Error)
 	}
-	return reply.Result, nil
+	return normalize(reply.Result), nil
+}
+
+// Lua has one table type, so an empty list and an empty map both leave the game
+// as `{}`: a field that is an array when the factory is busy becomes an object
+// when it is idle. Rewriting every empty object to `[]` costs nothing -- empty is
+// empty either way -- and spares whatever reads this from having to handle a
+// field whose type depends on the weather.
+func normalize(raw json.RawMessage) json.RawMessage {
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return raw
+	}
+	encoded, err := json.Marshal(emptyToArray(decoded))
+	if err != nil {
+		return raw
+	}
+	return encoded
+}
+
+func emptyToArray(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		if len(typed) == 0 {
+			return []any{}
+		}
+		for key, nested := range typed {
+			typed[key] = emptyToArray(nested)
+		}
+		return typed
+	case []any:
+		for index, nested := range typed {
+			typed[index] = emptyToArray(nested)
+		}
+		return typed
+	default:
+		return value
+	}
 }

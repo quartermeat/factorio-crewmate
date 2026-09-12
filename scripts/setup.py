@@ -13,7 +13,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 MODS = Path.home() / ".factorio" / "mods"
-LINK = MODS / "crewmate_0.1.0"
+LINK = MODS / "crewmate"
 ENV = Path.home() / ".config" / "crewmate" / "env"
 
 

@@ -1,30 +1,46 @@
 # Agent guide: crewmate
 
+An AI-controlled Factorio companion: a mod that gives an agent a body, and a Go
+bridge that lets one drive it. Read `README.md` for what it is and where it is
+going; this file is how to work on it.
+
 ## Layout
 
-- `mod/` is the Factorio mod, symlinked into `~/.factorio/mods/crewmate_0.1.0`.
-  `mod/script/body.lua` owns the character and its movement, `senses.lua` owns
-  everything it can report, `api.lua` is the RCON-facing seam.
-- `bridge/` is a single-package Go program, stdlib only.
+- `mod/script/body.lua` — the character and its movement. Nothing in here may
+  assume a player is attached: no cursor stacks, no GUIs, no `build_from_cursor`.
+- `mod/script/senses.lua` — everything the companion can report. Must work on a
+  server with nobody logged in, so prefer entity state over player alerts.
+- `mod/script/api.lua` — the RCON-facing seam. New calls go through `guarded()`
+  so a Lua error returns as a message instead of a dropped reply.
+- `bridge/` — one Go package, stdlib only. `rcon.go` is the protocol, `game.go`
+  the call convention, `mcp.go` the tool surface, `main.go` the CLI.
 
-## Conventions
+## Rules that matter
 
-- Every remote interface call returns a JSON string shaped `{ok, result}` or
-  `{ok=false, error}`. Add new calls through `guarded()` so a Lua error comes back
-  as a message instead of a dropped RCON reply.
-- The body must stay a real character: no cheat mode, no indestructible flag, no
-  teleporting where walking would do. Anything that would embarrass a human
-  player should embarrass this one.
-- Keep the mod side free of anything that only works with a player attached
-  (`build_from_cursor`, cursor stacks, GUIs): there is no player behind this body.
+- Keep the body fair: no cheat mode, no indestructible flag, no conjuring items,
+  no teleporting where walking would do. The point of the project is a companion
+  bound by the same rules as the player.
+- Every interface call returns `{ok, result}` or `{ok=false, error}`.
+- A game-side failure is a tool result flagged `isError`, never a protocol error:
+  the model should read the message and act on it.
+- New tools need a description that says what the answer is good for, not just
+  what the function is called.
 
 ## Testing
 
-Nothing here needs a graphical client except screenshots:
+    cd bridge && go test ./...
+    CREWMATE_INTEGRATION=1 go test -run Integration -v
 
-    export CREWMATE_RCON_PASSWORD=test
-    bridge/crewmate serve -save ~/.factorio/saves/fast-forward-fleet.zip &
-    bridge/crewmate call status
+The integration test creates its own map, mod directory and server in a temp
+directory, so it can run while you are playing. Everything else is fast and
+needs no game.
 
-The server writes to `~/.local/share/factorio-crewmate`, never `~/.factorio`, so
-it can run while the real game is open.
+For poking at a live game by hand, `crewmate call <fn> '<json>'` and
+`crewmate exec '<console command>'`.
+
+## Versioning
+
+`VERSION`, `mod/info.json` and the `version` constant in `bridge/main.go` move
+together, and every commit carries a `vMAJOR.MINOR.PATCH:` subject and an
+annotated tag. The mod is linked into `~/.factorio/mods/crewmate` without a
+version suffix so a bump does not mean relinking.
