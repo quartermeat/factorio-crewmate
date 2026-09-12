@@ -103,6 +103,9 @@ runs against a throwaway map in a temp directory and never touches `~/.factorio`
 - Single-player has no RCON. Hosting is not optional.
 - A headless server cannot render, so screenshots are taken by a joined graphical
   client (`by_player`) and fail cleanly when nobody is connected.
+- Hosting a save rewrites `~/.factorio/mods/mod-list.json` to match what that save
+  needs, so loading an old world can quietly re-enable a mod you turned off. Check
+  the list after hosting something unusual.
 - Lua has one table type, so an empty list and an empty map both arrive as `{}`.
   The bridge rewrites empty objects to `[]` so a field's type does not depend on
   whether the factory happens to be busy.

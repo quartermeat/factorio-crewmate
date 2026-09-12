@@ -150,3 +150,32 @@ func TestEmptyTablesBecomeArrays(t *testing.T) {
 		t.Fatalf("normalising lost data: %s", result)
 	}
 }
+
+// `crewmate serve -save x.zip` must honour the flag: Go's flag package stops at
+// the subcommand, and a silently ignored -save hosts the wrong world.
+func TestFlagsAfterSubcommandAreParsed(t *testing.T) {
+	defer func(previous string) { *save = previous }(*save)
+	command, rest, err := parseCommand([]string{"serve", "-save", "/tmp/elsewhere.zip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command != "serve" {
+		t.Fatalf("subcommand lost: %q", command)
+	}
+	if *save != "/tmp/elsewhere.zip" {
+		t.Fatalf("-save after the subcommand was ignored: %q", *save)
+	}
+	if len(rest) != 0 {
+		t.Fatalf("unexpected leftovers: %v", rest)
+	}
+}
+
+func TestSubcommandArgumentsSurvive(t *testing.T) {
+	command, rest, err := parseCommand([]string{"call", "walk_to", `{"x":1}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command != "call" || len(rest) != 2 || rest[0] != "walk_to" || rest[1] != `{"x":1}` {
+		t.Fatalf("arguments mangled: %q %v", command, rest)
+	}
+}

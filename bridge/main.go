@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -14,7 +15,7 @@ import (
 	"time"
 )
 
-const version = "0.2.0"
+const version = "0.2.1"
 
 var (
 	address    = flag.String("rcon", "127.0.0.1:27015", "address of the game's RCON port")
@@ -68,24 +69,51 @@ Flags:
 	flag.PrintDefaults()
 }
 
+// Flags are accepted on either side of the subcommand. The flag package stops at
+// the first non-flag argument, so `serve -save x.zip` would otherwise parse as a
+// bare subcommand and silently host whatever the default is.
+func parseCommand(arguments []string) (string, []string, error) {
+	if err := flag.CommandLine.Parse(arguments); err != nil {
+		return "", nil, err
+	}
+	rest := flag.Args()
+	if len(rest) == 0 {
+		return "", nil, nil
+	}
+	command := rest[0]
+	if err := flag.CommandLine.Parse(rest[1:]); err != nil {
+		return "", nil, err
+	}
+	return command, flag.Args(), nil
+}
+
 func main() {
 	flag.Usage = usage
-	flag.Parse()
-	if flag.NArg() == 0 {
+	command, arguments, err := parseCommand(os.Args[1:])
+	if err != nil {
+		os.Exit(2)
+	}
+	if command == "" {
 		usage()
 		os.Exit(2)
 	}
 
-	var err error
-	switch flag.Arg(0) {
+	argument := func(index int) string {
+		if index < len(arguments) {
+			return arguments[index]
+		}
+		return ""
+	}
+
+	switch command {
 	case "serve":
 		err = serve()
 	case "mcp":
 		err = withGame(ServeMCP)
 	case "call":
-		err = call(flag.Arg(1), flag.Arg(2))
+		err = call(argument(0), argument(1))
 	case "exec":
-		err = execute(strings.Join(flag.Args()[1:], " "))
+		err = execute(strings.Join(arguments, " "))
 	default:
 		usage()
 		os.Exit(2)
@@ -174,6 +202,14 @@ func serve() error {
 	}
 
 	port := strings.TrimPrefix(*address, "127.0.0.1:")
+	// Factorio logs that it started the RCON interface whether or not the bind
+	// succeeded, so a second server on the same port looks healthy while every
+	// command quietly goes to the first one. Refuse to start instead.
+	listener, err := net.Listen("tcp", *address)
+	if err != nil {
+		return fmt.Errorf("%s is already in use -- another server is probably still running: %w", *address, err)
+	}
+	listener.Close()
 	arguments := []string{
 		"--start-server", *save,
 		"--config", config,
