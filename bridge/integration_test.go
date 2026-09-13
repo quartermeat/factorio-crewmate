@@ -454,3 +454,82 @@ func TestIntegrationInGameRequestStartsADirective(t *testing.T) {
 	}
 	t.Logf("in-game request started %q (%s)", status.Name, status.State)
 }
+
+// Hand mining: no items are conjured, so the only proof is that the body is
+// carrying coal afterwards that it dug up itself.
+func TestIntegrationMinesCoalByHand(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	directives, err := LoadDirectives("../directives")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine := directives["mine-coal"]
+	if mine == nil {
+		t.Fatal("mine-coal directive is missing")
+	}
+
+	spot, err := mine.FindAnchor(game, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := mine.Compile(spot, map[string]float64{"amount": 12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := game.Call("run_plan", payload); err != nil {
+		t.Fatalf("run_plan: %v", err)
+	}
+
+	var status struct {
+		State string `json:"state"`
+		Step  int    `json:"step"`
+		Error string `json:"error"`
+	}
+	deadline := time.Now().Add(3 * time.Minute)
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		raw, err := game.Call("plan_status", nil)
+		if err != nil {
+			t.Fatalf("plan_status: %v", err)
+		}
+		json.Unmarshal(raw, &status)
+		if status.State != "running" {
+			break
+		}
+	}
+	if status.State != "done" {
+		t.Fatalf("mining did not finish: state=%s step=%d error=%s", status.State, status.Step, status.Error)
+	}
+
+	raw, err := game.Call("carrying", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pockets struct {
+		Carrying []struct {
+			Name  string `json:"name"`
+			Count int    `json:"count"`
+		} `json:"carrying"`
+	}
+	if err := json.Unmarshal(raw, &pockets); err != nil {
+		t.Fatalf("carrying shape: %s", raw)
+	}
+	coal := 0
+	for _, stack := range pockets.Carrying {
+		if stack.Name == "coal" {
+			coal = stack.Count
+		}
+	}
+	if coal < 12 {
+		t.Fatalf("it came back with %d coal, not the 12 it was asked for", coal)
+	}
+	t.Logf("hand-mined %d coal", coal)
+}

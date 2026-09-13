@@ -385,6 +385,69 @@ function Hands.build_nearest_ghost(body, area, skip, away_from)
   return name
 end
 
+-- Hand mining. A character with no player attached ignores mining_state -- that
+-- logic lives in the player controller -- so the digging is scripted, but paced
+-- by the same numbers the game would use: the ore's mining time over the
+-- character's mining speed, one unit at a time, and the patch depletes as it
+-- would under a real pair of hands.
+function Hands.mining_ticks(resource)
+  local ore = prototypes.entity[resource]
+  local character = prototypes.entity["character"]
+  local time = 1
+  if ore and ore.mineable_properties and ore.mineable_properties.mining_time then
+    time = ore.mineable_properties.mining_time
+  end
+  local speed = (character and character.mining_speed) or 0.5
+  return math.max(6, math.floor(time / speed * 60))
+end
+
+function Hands.reach_ore(body, entity)
+  if not (entity and entity.valid) then return nil, "nothing to mine" end
+  local dx, dy = body.position.x - entity.position.x, body.position.y - entity.position.y
+  if math.sqrt(dx * dx + dy * dy) > body.resource_reach_distance then
+    return nil, "walking", entity.position
+  end
+  return true
+end
+
+function Hands.mine_one(body, entity)
+  local reached, reason, position = Hands.reach_ore(body, entity)
+  if not reached then return nil, reason, position end
+
+  local product = Hands.product_of(entity.name)
+  local inventory = body.get_main_inventory()
+  if not inventory or not inventory.can_insert{name = product, count = 1} then
+    return nil, "my pockets are full"
+  end
+
+  -- Show the animation even though it is not what does the work.
+  body.mining_state = {mining = true, position = entity.position}
+
+  if entity.amount and entity.amount > 1 then
+    entity.amount = entity.amount - 1
+    inventory.insert{name = product, count = 1}
+  elseif not entity.mine{inventory = inventory, raise_destroyed = true} then
+    return nil, "that ore will not come up"
+  end
+  return true
+end
+
+function Hands.stop_mining(body)
+  if body and body.valid then body.mining_state = {mining = false} end
+end
+
+-- What a resource turns into when mined, so a directive can say "coal" and mean
+-- both the patch and the item.
+function Hands.product_of(resource)
+  local prototype = prototypes.entity[resource]
+  if not prototype then return resource end
+  local properties = prototype.mineable_properties
+  if properties and properties.products and properties.products[1] then
+    return properties.products[1].name
+  end
+  return resource
+end
+
 -- What the body is carrying, as a directive's shopping list would describe it.
 function Hands.missing(body, required)
   local short = {}

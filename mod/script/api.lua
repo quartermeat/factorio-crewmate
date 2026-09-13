@@ -140,7 +140,11 @@ local interface =
     if not argument.directive then return fail("which directive?") end
     storage.crew = storage.crew or {}
     storage.crew.requests = storage.crew.requests or {}
-    table.insert(storage.crew.requests, {directive = argument.directive, player = argument.player or "bridge"})
+    table.insert(storage.crew.requests, {
+      directive = argument.directive,
+      player = argument.player or "bridge",
+      parameters = argument.parameters,
+    })
     return ok({queued = argument.directive})
   end),
 
@@ -225,7 +229,7 @@ end
 
 -- /crew do queues a directive by name. Nothing here knows what the directives
 -- are; the bridge polls for these and does the rest.
-local function request_directive(player, parameter)
+local function request_directive(player, parameter, parameters)
   storage.crew = storage.crew or {}
   local catalogue = storage.crew.catalogue or {}
 
@@ -252,8 +256,23 @@ local function request_directive(player, parameter)
   end
 
   storage.crew.requests = storage.crew.requests or {}
-  table.insert(storage.crew.requests, {directive = name, player = player.name, tick = game.tick})
+  table.insert(storage.crew.requests,
+    {directive = name, player = player.name, tick = game.tick, parameters = parameters})
   player.print("[Crewmate] right -- " .. name .. ". Give me a moment to work out where.")
+end
+
+-- /crew mine coal 200 is /crew do mine-coal with an amount: the common case
+-- deserves the shorter sentence.
+local function request_mining(player, parameter)
+  local resource, amount = parameter:match("^(%S*)%s*(%d*)$")
+  resource = normalise(resource or "")
+  if resource == "" then
+    player.print("[Crewmate] mine what? Try /crew mine coal 200.")
+    return
+  end
+  local parameters = {}
+  if tonumber(amount) then parameters.amount = tonumber(amount) end
+  request_directive(player, "mine-" .. resource, parameters)
 end
 
 local HELP =
@@ -264,6 +283,7 @@ local HELP =
   "/crew take <item> [n]  -- hand me some of your items",
   "/crew give [item]      -- hand them back",
   "/crew do [directive]   -- list directives, or carry one out",
+  "/crew mine <ore> [n]   -- go and hand-mine some ore",
 }
 
 commands.add_command("crew", "Crewmate: /crew help for what it understands.", function(command)
@@ -294,6 +314,7 @@ commands.add_command("crew", "Crewmate: /crew help for what it understands.", fu
   if verb == "take" then return hand_over(player, rest) end
   if verb == "give" then return hand_back(player, rest) end
   if verb == "do" then return request_directive(player, rest) end
+  if verb == "mine" then return request_mining(player, rest) end
 
   local state = Senses.status()
   if state.body and state.body.missing then

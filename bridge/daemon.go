@@ -92,15 +92,16 @@ func (d *Daemon) serve(game *Game, stop <-chan struct{}, interval time.Duration)
 		}
 		var pending struct {
 			Requests []struct {
-				Directive string `json:"directive"`
-				Player    string `json:"player"`
+				Directive  string             `json:"directive"`
+				Player     string             `json:"player"`
+				Parameters map[string]float64 `json:"parameters"`
 			} `json:"requests"`
 		}
 		if err := json.Unmarshal(raw, &pending); err != nil {
 			continue
 		}
 		for _, request := range pending.Requests {
-			if err := d.start(game, request.Directive); err != nil {
+			if err := d.start(game, request.Directive, request.Parameters); err != nil {
 				fmt.Fprintf(os.Stderr, "crewmate: %s: %v\n", request.Directive, err)
 				game.Call("say", map[string]any{"message": "I cannot do that: " + err.Error()})
 			}
@@ -108,7 +109,7 @@ func (d *Daemon) serve(game *Game, stop <-chan struct{}, interval time.Duration)
 	}
 }
 
-func (d *Daemon) start(game *Game, name string) error {
+func (d *Daemon) start(game *Game, name string, overrides map[string]float64) error {
 	known, err := LoadDirectives(d.Directives)
 	if err != nil {
 		return err
@@ -122,7 +123,7 @@ func (d *Daemon) start(game *Game, name string) error {
 	if err != nil {
 		return err
 	}
-	payload, err := chosen.Compile(spot, nil)
+	payload, err := chosen.Compile(spot, overrides)
 	if err != nil {
 		return err
 	}

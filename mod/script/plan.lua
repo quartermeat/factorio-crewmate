@@ -91,6 +91,11 @@ HANDLERS.say = function(plan, body, step)
 end
 
 HANDLERS.goto_position = function(plan, body, step)
+  if type(step.at) == "string" then
+    local place = marked(plan, step.at)
+    if not place then return fail(plan, "I have not found " .. step.at .. " yet") end
+    step.x, step.y = place.x, place.y
+  end
   local target = {x = step.x, y = step.y}
   local dx, dy = body.position.x - target.x, body.position.y - target.y
   if math.sqrt(dx * dx + dy * dy) <= (step.within or 3) then
@@ -342,6 +347,70 @@ HANDLERS.check_power = function(plan, body, step)
     announce(string.format("%d of the %d %s are not powered yet.", total - connected, total, step.to))
   end
   advance(plan)
+end
+
+-- Mine until it is carrying enough, or until the patch runs out. Progress keeps
+-- the step alive, so a long dig does not look like a stall.
+HANDLERS.mine = function(plan, body, step)
+  local resource = step.resource or "coal"
+  local item = step.item or Hands.product_of(resource)
+  local target = step.amount or 100
+  local carried = Hands.carrying(body, item)
+
+  if carried >= target then
+    Hands.stop_mining(body)
+    Body.halt()
+    record(plan, "mined", string.format("%d %s", carried, item))
+    announce(string.format("got %d %s.", carried, item))
+    advance(plan)
+    return
+  end
+
+  local centre = marked(plan, step.patch or resource) or body.position
+  local ore = body.surface.find_entities_filtered
+  {
+    name = resource, position = centre, radius = step.radius or 48, limit = 200,
+  }
+  local closest, closest_gap
+  for _, candidate in pairs(ore) do
+    local dx, dy = candidate.position.x - body.position.x, candidate.position.y - body.position.y
+    local gap = dx * dx + dy * dy
+    if not closest_gap or gap < closest_gap then closest, closest_gap = candidate, gap end
+  end
+
+  if not closest then
+    Hands.stop_mining(body)
+    Body.halt()
+    if carried == 0 then return fail(plan, "there is no " .. resource .. " left around here") end
+    record(plan, "mined", string.format("%d %s, then the patch ran out", carried, item))
+    announce(string.format("patch is gone; I got %d %s.", carried, item))
+    advance(plan)
+    return
+  end
+
+  local reached, reason, position = Hands.reach_ore(body, closest)
+  if not reached then
+    if reason == "walking" then
+      Hands.stop_mining(body)
+      Body.walk_to(position)
+      return
+    end
+    return fail(plan, reason)
+  end
+  Body.halt()
+
+  -- One swing per the ore's own mining time, so a hundred coal takes as long as
+  -- a hundred coal should.
+  local interval = Hands.mining_ticks(resource)
+  if plan.mine_next and game.tick < plan.mine_next then return end
+  plan.mine_next = game.tick + interval
+
+  local mined, why = Hands.mine_one(body, closest)
+  if not mined then
+    Hands.stop_mining(body)
+    return fail(plan, why)
+  end
+  plan.step_started = game.tick
 end
 
 HANDLERS.wait = function(plan, body, step)

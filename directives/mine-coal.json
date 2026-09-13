@@ -1,0 +1,42 @@
+{
+  "name": "mine-coal",
+  "title": "Go and mine some coal",
+  "description": "Walks to the nearest coal patch and hand-mines until it is carrying the amount asked for, or the patch runs out.",
+  "parameters": {
+    "amount": {
+      "default": 100,
+      "description": "how much coal to come back with"
+    },
+    "reach": {
+      "default": 128,
+      "description": "how far to look for a patch"
+    }
+  },
+  "steps": [
+    {
+      "do": "say",
+      "message": "Looking for coal."
+    },
+    {
+      "do": "find_resource",
+      "resource": "coal",
+      "radius": "$reach",
+      "as": "coal"
+    },
+    {
+      "do": "goto",
+      "at": "coal",
+      "within": 6
+    },
+    {
+      "do": "mine",
+      "resource": "coal",
+      "patch": "coal",
+      "amount": "$amount"
+    },
+    {
+      "do": "say",
+      "message": "Coal in hand. /crew give coal if you want it."
+    }
+  ]
+}

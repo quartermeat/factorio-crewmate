@@ -60,6 +60,7 @@ password to `~/.config/crewmate/env`. It prints the one command you run yourself
     /crew give [item]      have it hand them back
     /crew do               list the directives it knows
     /crew do <directive>   carry one out
+    /crew mine <ore> [n]   go and hand-mine some ore
     /crew stop             stand still, drop the current directive
 
 `/crew take` exists because Factorio has no way to put items into another
@@ -142,6 +143,7 @@ The verbs are `say`, `goto`, `stamp`, `build_ghosts`, `insert`, `place`,
 | `belt_line` | a two-leg belt run from a mark to an entity, ending in an inserter facing it |
 | `pole_line` | poles close enough together to carry power the whole way |
 | `check_power` | confirms two things ended up on the same electric network |
+| `mine` | hand-mines a patch until it is carrying enough, or the patch runs out |
 
 Marks are how a directive refers to things it could not have known: `find_resource`
 writes one, `drill_row` and `belt_line` read them. `insert` names an entity
@@ -175,6 +177,10 @@ whole thing over in one call.
   fails. The body steps off a footprint before building it.
 - A directive that reports "done" when the pole run never joined up is worse than
   one that admits it, which is what `check_power` is for.
+- A character with no player attached **ignores `mining_state`** -- that logic
+  lives in the player controller. Digging is scripted instead, but paced by the
+  game's own numbers: the ore's mining time over the character's mining speed, one
+  unit at a time, and the patch depletes exactly as it would by hand.
 
 ## Iterating
 
