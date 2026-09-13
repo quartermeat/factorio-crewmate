@@ -8,8 +8,8 @@
       "description": "how much to come back with"
     },
     "reach": {
-      "default": 128,
-      "description": "how far to look"
+      "default": 512,
+      "description": "how far to look; the map has to be explored that far"
     }
   },
   "steps": [

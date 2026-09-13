@@ -1046,3 +1046,93 @@ func TestIntegrationOffersOnlyWhatIsUnlocked(t *testing.T) {
 	}
 	t.Log("locked recipes disappear from what it offers")
 }
+
+// "Fetch me twenty coal" means twenty more than it set off with. Anything else
+// makes a second request look like it did nothing.
+func TestIntegrationMineFetchesThatManyMore(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatal(err)
+	}
+	// Start with a pocketful, so absolute and additive give different answers.
+	if _, err := game.client.Exec(`/sc local b = game.surfaces.nauvis.find_entities_filtered{name="character"}[1] ` +
+		`b.insert{name="coal", count=40} rcon.print("given")`); err != nil {
+		t.Fatal(err)
+	}
+
+	known, err := LoadDirectives("../directives")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := known["mine-coal"].CompileWith(Spot{}, map[string]any{"amount": float64(5), "reach": float64(512)}, known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := game.Call("run_plan", payload); err != nil {
+		t.Fatal(err)
+	}
+
+	var status struct {
+		State string `json:"state"`
+		Error string `json:"error"`
+	}
+	deadline := time.Now().Add(3 * time.Minute)
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		raw, err := game.Call("plan_status", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		json.Unmarshal(raw, &status)
+		if status.State != "running" {
+			break
+		}
+	}
+	if status.State != "done" {
+		t.Fatalf("mine-coal did not finish: %s %s", status.State, status.Error)
+	}
+
+	raw, err := game.Call("carrying", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pockets struct {
+		Carrying []struct {
+			Name  string `json:"name"`
+			Count int    `json:"count"`
+		} `json:"carrying"`
+	}
+	json.Unmarshal(raw, &pockets)
+	coal := 0
+	for _, stack := range pockets.Carrying {
+		if stack.Name == "coal" {
+			coal = stack.Count
+		}
+	}
+	if coal < 45 {
+		t.Fatalf("started with 40 coal and asked for 5 more; came back with %d", coal)
+	}
+	t.Logf("started with 40, asked for 5 more, came back with %d", coal)
+}
+
+// Nothing nearby should produce an answer that says what is actually out there.
+func TestIntegrationSaysHowFarTheOreIs(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := game.Call("find_resource", map[string]any{"resource": "coal", "radius": 8})
+	if err == nil {
+		t.Skipf("there is coal within 8 tiles of spawn in this world: %s", raw)
+	}
+	if !strings.Contains(err.Error(), "tiles away") && !strings.Contains(err.Error(), "explored") {
+		t.Fatalf("a failure should say what it can see, not just that it found nothing: %q", err)
+	}
+	t.Logf("said: %s", err)
+}

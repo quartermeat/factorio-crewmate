@@ -60,9 +60,10 @@ function Works.find_resource(body, what, radius, kind)
   local reach = radius or 128
   local found
 
-  for _, ring in pairs({8, 16, 32, 64, 128, 192, 256}) do
-    if ring <= reach + 32 then
-      local filter = {position = body.position, radius = math.min(ring, reach)}
+  local rings = {8, 16, 32, 64, 128, 192, 256, 384, 512}
+  for _, ring in pairs(rings) do
+    if ring <= reach then
+      local filter = {position = body.position, radius = ring}
       if kind == "type" then filter.type = what else filter.name = what end
       local candidates = surface.find_entities_filtered(filter)
       if #candidates > 0 then
@@ -71,7 +72,35 @@ function Works.find_resource(body, what, radius, kind)
       end
     end
   end
-  if not found then return nil, string.format("no %s within %d tiles", what, reach) end
+  -- One last look at exactly the distance asked for, so an odd reach is not
+  -- rounded down to the ring below it.
+  if not found then
+    local filter = {position = body.position, radius = reach}
+    if kind == "type" then filter.type = what else filter.name = what end
+    local candidates = surface.find_entities_filtered(filter)
+    if #candidates > 0 then found = candidates end
+  end
+
+  if not found then
+    -- Say what is actually out there. Nothing within reach usually means the map
+    -- beyond it has never been generated, and no amount of searching finds ore in
+    -- chunks that do not exist yet.
+    local wider = {position = body.position, radius = 1000}
+    if kind == "type" then wider.type = what else wider.name = what end
+    local distant = surface.find_entities_filtered(wider)
+    if #distant > 0 then
+      local nearest
+      for _, entity in pairs(distant) do
+        local dx, dy = entity.position.x - body.position.x, entity.position.y - body.position.y
+        local gap = math.sqrt(dx * dx + dy * dy)
+        if not nearest or gap < nearest then nearest = gap end
+      end
+      return nil, string.format("no %s within %d tiles; the nearest I can see is %.0f tiles away -- ask for a bigger reach",
+        what, reach, nearest)
+    end
+    return nil, string.format("no %s within %d tiles, and none anywhere I have seen -- the map that way may not be explored yet",
+      what, reach)
+  end
 
   local nearest, nearest_gap
   for _, entity in pairs(found) do

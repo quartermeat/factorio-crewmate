@@ -419,13 +419,12 @@ HANDLERS.make = function(plan, body, step)
 
   local inserted = {}
   for _, entry in pairs(plan_for.mine) do
-    local carrying = Hands.carrying(body, entry.name)
     inserted[#inserted + 1] =
     {
       ["do"] = "mine",
       resource = entry.mine.resource,
       kind = entry.mine.kind,
-      amount = carrying + entry.count,
+      amount = entry.count,
       radius = step.radius or 192,
       item = entry.name,
     }
@@ -514,7 +513,9 @@ end
 HANDLERS.mine = function(plan, body, step)
   local resource = step.resource or "coal"
   local kind = step.kind -- "type" for things like trees, which have many names
-  local target = step.amount or 100
+  -- "Fetch me a hundred coal" means a hundred more than it set off with, not
+  -- "stop once you happen to be holding a hundred".
+  local wanted = step.amount or 100
 
   -- A type search -- "tree" rather than "wood" -- cannot know what it yields
   -- until it has found one, and asking the inventory for "tree" is an error.
@@ -533,13 +534,16 @@ HANDLERS.mine = function(plan, body, step)
     end
   end
   local carried = Hands.carrying(body, item)
+  if not plan.mine_base then plan.mine_base = carried end
+  local target = plan.mine_base + wanted
 
   if carried >= target then
     Body.sign(nil)
     Hands.stop_mining(body)
     Body.halt()
-    record(plan, "mined", string.format("%d %s", carried, item))
-    announce(string.format("got %d %s.", carried, item))
+    record(plan, "mined", string.format("%d %s", carried - plan.mine_base, item))
+    announce(string.format("got %d %s -- %d in hand.", carried - plan.mine_base, item, carried))
+    plan.mine_base, plan.mine_next, plan.mine_started, plan.mine_announced = nil, nil, nil, nil
     advance(plan)
     return
   end
@@ -556,8 +560,9 @@ HANDLERS.mine = function(plan, body, step)
     if carried == 0 then
       return fail(plan, "there is no " .. resource .. " around here I can get to")
     end
-    record(plan, "mined", string.format("%d %s, then the patch ran out", carried, item))
-    announce(string.format("patch is gone; I got %d %s.", carried, item))
+    record(plan, "mined", string.format("%d %s, then the patch ran out", carried - (plan.mine_base or 0), item))
+    announce(string.format("patch is gone; I got %d %s.", carried - (plan.mine_base or 0), item))
+    plan.mine_base = nil
     advance(plan)
     return
   end

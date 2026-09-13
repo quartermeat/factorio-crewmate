@@ -146,7 +146,7 @@ The verbs are `say`, `goto`, `stamp`, `build_ghosts`, `insert`, `place`,
 | `belt_line` | a two-leg belt run from a mark to an entity, ending in an inserter facing it |
 | `pole_line` | poles close enough together to carry power the whole way |
 | `check_power` | confirms two things ended up on the same electric network |
-| `mine` | hand-mines a patch until it is carrying enough, or the patch runs out |
+| `mine` | fetches that many more of something, or says why it cannot |
 | `make` | expands a recipe to raw materials and splices the digging into the plan |
 | `craft` | hand-crafts, waiting on the crafting queue |
 
@@ -160,6 +160,12 @@ Everything a starting kit can take out of the ground by hand has a job of its ow
     /crew mine stone
     /crew mine wood          chopped from the nearest trees
     /crew make furnace       makes it, digging up what it needs first
+
+An amount is **how many more to fetch**, not a total to end up holding: asking for
+a hundred coal twice gets you two hundred coal. The search widens in rings out to
+512 tiles, and when it finds nothing it says what it can see -- *"the nearest I can
+see is 300 tiles away"*, or that the map that way has never been explored, since
+ore in ungenerated chunks does not exist to be found.
 
 Each is a thin wrapper over `gather`, which takes the resource as a parameter, so
 adding one is four lines of JSON rather than any new code. Anything else minable
