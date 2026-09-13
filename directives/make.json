@@ -1,0 +1,31 @@
+{
+  "name": "make",
+  "title": "Make something by hand",
+  "description": "Works out what the thing takes, subtracts what is already carried, digs up whatever is still missing, and then crafts it. Only recipes a pair of hands can do: anything wanting a furnace or an assembler is refused up front, with the list of what it would have needed.",
+  "parameters": {
+    "item": {
+      "default": "stone-furnace",
+      "description": "what to make, by its internal name"
+    },
+    "count": {
+      "default": 1,
+      "description": "how many"
+    },
+    "reach": {
+      "default": 192,
+      "description": "how far to go looking for materials"
+    }
+  },
+  "steps": [
+    {
+      "do": "make",
+      "item": "$item",
+      "count": "$count",
+      "radius": "$reach"
+    },
+    {
+      "do": "say",
+      "message": "Made it. /crew give if you want it."
+    }
+  ]
+}

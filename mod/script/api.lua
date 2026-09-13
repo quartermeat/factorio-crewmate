@@ -316,6 +316,37 @@ local function request_mining(player, parameter)
   request_directive(player, "gather", parameters)
 end
 
+-- /crew make stone-furnace 2, or /crew make furnace: short names people use for
+-- the handful of things worth hand-making early.
+local ITEM_NAMES =
+{
+  furnace = "stone-furnace",
+  ["stone-furnace"] = "stone-furnace",
+  smelter = "stone-furnace",
+  chest = "wooden-chest",
+  box = "wooden-chest",
+  belt = "transport-belt",
+  inserter = "inserter",
+  drill = "burner-mining-drill",
+  ["burner-drill"] = "burner-mining-drill",
+  axe = "iron-axe",
+  pole = "small-electric-pole",
+  pipe = "pipe",
+  lab = "lab",
+}
+
+local function request_making(player, parameter)
+  local item, count = parameter:match("^(%S*)%s*(%d*)$")
+  item = normalise(item or "")
+  if item == "" then
+    player.print("[Crew] make what? Try /crew make furnace 2.")
+    return
+  end
+  local parameters = {item = ITEM_NAMES[item] or item}
+  if tonumber(count) then parameters.count = tonumber(count) end
+  request_directive(player, "make", parameters)
+end
+
 local HELP =
 {
   "/crew            -- where I am and what I am doing",
@@ -325,6 +356,7 @@ local HELP =
   "/crew give [item]      -- hand them back",
   "/crew do [directive]   -- list directives, or carry one out",
   "/crew mine <ore> [n]   -- go and hand-mine some ore",
+  "/crew make <thing> [n] -- make something, digging up what it needs first",
 }
 
 local function run_command(command)
@@ -356,6 +388,7 @@ local function run_command(command)
   if verb == "give" then return hand_back(player, rest) end
   if verb == "do" then return request_directive(player, rest) end
   if verb == "mine" then return request_mining(player, rest) end
+  if verb == "make" then return request_making(player, rest) end
 
   local state = Senses.status()
   if state.body and state.body.missing then

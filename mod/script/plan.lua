@@ -5,6 +5,7 @@
 local Body = require("script.body")
 local Hands = require("script.hands")
 local Works = require("script.works")
+local Craft = require("script.craft")
 
 local Plan = {}
 
@@ -394,6 +395,90 @@ HANDLERS.pole_line = function(plan, body, step)
   local run = Works.pole_line(body, {from = from, to = to, pole = step.pole, spacing = step.spacing})
   record(plan, "marked out", string.format("%d poles", run.poles))
   advance(plan)
+end
+
+-- "Make a stone furnace" is a want, not a plan. This turns it into one: work out
+-- what it would take, subtract what is in its pockets, and splice the digging in
+-- ahead of the crafting. The plan is data, so a step can write more steps.
+HANDLERS.make = function(plan, body, step)
+  local item = step.item
+  local count = step.count or 1
+  if not item then return fail(plan, "make what?") end
+
+  local plan_for, err = Craft.requirements(body, item, count)
+  if not plan_for then return fail(plan, err) end
+
+  if #plan_for.cannot_make > 0 then
+    local list = {}
+    for _, entry in pairs(plan_for.cannot_make) do
+      list[#list + 1] = string.format("%d %s", entry.count, entry.name)
+    end
+    return fail(plan, string.format("%s needs %s, and I cannot make those by hand",
+      item, table.concat(list, ", ")))
+  end
+
+  local inserted = {}
+  for _, entry in pairs(plan_for.mine) do
+    local carrying = Hands.carrying(body, entry.name)
+    inserted[#inserted + 1] =
+    {
+      ["do"] = "mine",
+      resource = entry.mine.resource,
+      kind = entry.mine.kind,
+      amount = carrying + entry.count,
+      radius = step.radius or 192,
+      item = entry.name,
+    }
+  end
+  inserted[#inserted + 1] = {["do"] = "craft", item = item, count = count}
+
+  -- Splice them in directly after this step.
+  for offset, extra in pairs(inserted) do
+    table.insert(plan.steps, plan.index + offset, extra)
+  end
+
+  if #plan_for.mine > 0 then
+    local list = {}
+    for _, entry in pairs(plan_for.mine) do
+      list[#list + 1] = string.format("%d %s", entry.count, entry.name)
+    end
+    announce(string.format("%d %s needs %s -- digging first.", count, item, table.concat(list, ", ")))
+    record(plan, "planned", string.format("%s: mine %s", item, table.concat(list, ", ")))
+  else
+    announce(string.format("making %d %s from what I am carrying.", count, item))
+    record(plan, "planned", item .. ": nothing to dig")
+  end
+  advance(plan)
+end
+
+HANDLERS.craft = function(plan, body, step)
+  local item = step.item
+  local wanted = step.count or 1
+  local carrying = Craft.carrying(body, item)
+  if carrying >= (plan.craft_target or wanted) then
+    Body.sign(nil)
+    record(plan, "made", string.format("%d %s", carrying, item))
+    announce(string.format("made %d %s.", wanted, item))
+    plan.craft_target, plan.craft_started = nil, nil
+    advance(plan)
+    return
+  end
+
+  plan.craft_target = plan.craft_target or (carrying + wanted)
+
+  if Craft.busy(body) then
+    Body.sign(string.format("crafting %s", item))
+    plan.step_started = game.tick -- the queue is moving; that is progress
+    return
+  end
+
+  local started, why = Craft.begin(body, item, plan.craft_target - carrying)
+  if started == 0 then
+    return fail(plan, why or string.format("I cannot start crafting %s -- something is missing", item))
+  end
+  plan.craft_started = started
+  plan.step_started = game.tick
+  Body.sign(string.format("crafting %s", item))
 end
 
 -- Check the job actually did what it was for. An unattended loop that reports

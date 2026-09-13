@@ -147,6 +147,8 @@ The verbs are `say`, `goto`, `stamp`, `build_ghosts`, `insert`, `place`,
 | `pole_line` | poles close enough together to carry power the whole way |
 | `check_power` | confirms two things ended up on the same electric network |
 | `mine` | hand-mines a patch until it is carrying enough, or the patch runs out |
+| `make` | expands a recipe to raw materials and splices the digging into the plan |
+| `craft` | hand-crafts, waiting on the crafting queue |
 
 ### The starting materials
 
@@ -157,10 +159,27 @@ Everything a starting kit can take out of the ground by hand has a job of its ow
     /crew mine copper        copper-ore
     /crew mine stone
     /crew mine wood          chopped from the nearest trees
+    /crew make furnace       makes it, digging up what it needs first
 
 Each is a thin wrapper over `gather`, which takes the resource as a parameter, so
 adding one is four lines of JSON rather than any new code. Anything else minable
 still works -- `/crew mine uranium-ore` goes through `gather` directly.
+
+### Making things
+
+    /crew make furnace        works out it needs 5 stone, digs it, crafts it
+    /crew make chest 4
+    /crew make belt 20
+
+`make` is a want, not a plan. Given a thing and a count it expands the recipe down
+to raw materials, spends whatever is already in its pockets on the way down, and
+then **rewrites the plan**: the digging it turns out to need is spliced in ahead of
+the crafting. The plan is data, so a step can write more steps.
+
+Only recipes a pair of hands can do. Anything wanting a furnace or an assembler is
+refused before a shovel is lifted, and the refusal names what it was short of:
+
+    iron-chest needs 8 iron-plate, and I cannot make those by hand
 
 ### Deciding what to do next
 
@@ -271,12 +290,14 @@ too, but this mod has no data stage, so that rarely comes up.
   game. *Done.*
 - **v0.7 — scripted decisions.** Conditions, labels, jumps and composition, so a
   directive decides its own next step. *Done.*
-- **v0.8 — a sense of place.** Remembers the base: named areas, what it built,
+- **v0.8 — making things.** Recipes expanded to raw materials, with the gathering
+  worked out and inserted by the agent itself. *Done.*
+- **v0.9 — a sense of place.** Remembers the base: named areas, what it built,
   what it was asked to leave alone.
-- **v0.9 — initiative.** Standing orders it acts on — keep turrets fed, fix the
+- **v0.10 — initiative.** Standing orders it acts on — keep turrets fed, fix the
   brownout, extend the smelter row — and the judgement to ask first when a job is
   bigger than the order.
-- **v0.10 — manners.** An audit log of every action, per-player permissions, and an
+- **v0.11 — manners.** An audit log of every action, per-player permissions, and an
   undo that actually works.
 
 ## Testing

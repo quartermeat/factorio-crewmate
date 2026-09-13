@@ -772,3 +772,142 @@ func TestIntegrationMinesEachStartingMaterial(t *testing.T) {
 		})
 	}
 }
+
+// "Make a stone furnace" with empty pockets: the agent has to work out that it
+// means five stone, go and dig five stone, and then craft the thing. Nothing
+// outside the game decides any of that.
+func TestIntegrationMakePlansItsOwnMaterials(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatal(err)
+	}
+
+	known, err := LoadDirectives("../directives")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := known["make"].CompileWith(Spot{}, map[string]any{
+		"item": "stone-furnace", "count": float64(1), "reach": float64(256),
+	}, known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(payload["steps"].([]map[string]any))
+	if _, err := game.Call("run_plan", payload); err != nil {
+		t.Fatalf("run_plan: %v", err)
+	}
+
+	var status struct {
+		State string           `json:"state"`
+		Steps int              `json:"steps"`
+		Error string           `json:"error"`
+		Log   []map[string]any `json:"log"`
+	}
+	deadline := time.Now().Add(5 * time.Minute)
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		raw, err := game.Call("plan_status", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		json.Unmarshal(raw, &status)
+		if status.State != "running" {
+			break
+		}
+	}
+	if status.State != "done" {
+		t.Fatalf("make did not finish: %s %s", status.State, status.Error)
+	}
+
+	// The plan must have grown: the digging was not in the directive.
+	if status.Steps <= before {
+		t.Fatalf("the plan never grew: %d steps, started with %d", status.Steps, before)
+	}
+	var planned, made bool
+	for _, entry := range status.Log {
+		if entry["outcome"] == "planned" {
+			planned = true
+		}
+		if entry["outcome"] == "made" {
+			made = true
+		}
+	}
+	if !planned || !made {
+		t.Fatalf("expected it to plan and then make: %v", status.Log)
+	}
+
+	raw, err := game.Call("carrying", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pockets struct {
+		Carrying []struct {
+			Name  string `json:"name"`
+			Count int    `json:"count"`
+		} `json:"carrying"`
+	}
+	json.Unmarshal(raw, &pockets)
+	furnaces := 0
+	for _, stack := range pockets.Carrying {
+		if stack.Name == "stone-furnace" {
+			furnaces = stack.Count
+		}
+	}
+	if furnaces < 1 {
+		t.Fatalf("no furnace in its pockets afterwards: %v", pockets.Carrying)
+	}
+	t.Logf("planned its own materials and made %d stone furnace (plan grew %d -> %d steps)",
+		furnaces, before, status.Steps)
+}
+
+// Something needing a furnace cannot be hand-made, and saying so up front beats
+// digging for ten minutes and then failing.
+func TestIntegrationMakeRefusesWhatHandsCannotDo(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatal(err)
+	}
+	known, err := LoadDirectives("../directives")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := known["make"].CompileWith(Spot{}, map[string]any{
+		"item": "iron-chest", "count": float64(1),
+	}, known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := game.Call("run_plan", payload); err != nil {
+		t.Fatal(err)
+	}
+
+	var status struct {
+		State string `json:"state"`
+		Error string `json:"error"`
+	}
+	deadline := time.Now().Add(40 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(time.Second)
+		raw, err := game.Call("plan_status", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		json.Unmarshal(raw, &status)
+		if status.State != "running" {
+			break
+		}
+	}
+	if status.State != "failed" {
+		t.Fatalf("expected it to refuse an iron chest, got %s", status.State)
+	}
+	if !strings.Contains(status.Error, "iron-plate") {
+		t.Fatalf("the refusal should name what it was short of: %q", status.Error)
+	}
+	t.Logf("refused politely: %s", status.Error)
+}

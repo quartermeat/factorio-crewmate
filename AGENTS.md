@@ -25,6 +25,17 @@ says so in chat -- that is the point at which a person or an agent is worth
 involving. Adding a feature that needs a model in the loop to work at all is
 going the wrong way.
 
+## How clever the planning should be
+
+Shallow and pragmatic. `make` expands a recipe to raw materials and splices in the
+digging; that is the right amount of cleverness for now. Do not build a general
+planner, a goal solver, or a deep decision tree -- the interesting version of that
+is a small local model collapsing a big tree into a few steps, and writing a
+mountain of scripted branching first would only be in its way.
+
+Prefer whatever gets a play test finished. When something needs a decision the
+directive format cannot express, say so rather than inventing machinery for it.
+
 ## Rules that matter
 
 - Keep the body fair: no cheat mode, no indestructible flag, no conjuring items,
