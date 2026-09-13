@@ -493,6 +493,7 @@ func TestIntegrationMinesCoalByHand(t *testing.T) {
 		Step  int    `json:"step"`
 		Error string `json:"error"`
 	}
+	var sawMining bool
 	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
 		time.Sleep(2 * time.Second)
@@ -501,6 +502,20 @@ func TestIntegrationMinesCoalByHand(t *testing.T) {
 			t.Fatalf("plan_status: %v", err)
 		}
 		json.Unmarshal(raw, &status)
+
+		// Standing there with the mining animation running is the difference
+		// between working and looking broken.
+		if body, err := game.Call("status", nil); err == nil {
+			var state struct {
+				Body struct {
+					Sign string `json:"sign"`
+				} `json:"body"`
+			}
+			json.Unmarshal(body, &state)
+			if strings.Contains(state.Body.Sign, "mining") {
+				sawMining = true
+			}
+		}
 		if status.State != "running" {
 			break
 		}
@@ -531,7 +546,10 @@ func TestIntegrationMinesCoalByHand(t *testing.T) {
 	if coal < 12 {
 		t.Fatalf("it came back with %d coal, not the 12 it was asked for", coal)
 	}
-	t.Logf("hand-mined %d coal", coal)
+	if !sawMining {
+		t.Fatal("nothing above its head ever said it was mining: it looks broken while it works")
+	}
+	t.Logf("hand-mined %d coal, visibly", coal)
 }
 
 // "Find the closest coal" has to mean the closest, not whichever the engine

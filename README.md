@@ -2,7 +2,7 @@
 
 A scripted agent that plays Factorio alongside you. Not a puppet of your
 character and not a god-mode console script: a `character` entity standing in
-your world with a nametag over its head -- **Agent** -- that walks, talks, watches
+your world with a nametag over its head -- **Crew** -- that walks, talks, watches
 the factory and builds. It runs directives: small jobs written as data, chained by
 conditions it checks itself. A person or a model can give it one, but neither is
 in the loop while it works.
@@ -54,22 +54,22 @@ password to `~/.config/crewmate/env`. It prints the one command you run yourself
 
 ### From inside the game
 
-`/agent` and `/crew` are the same command.
+`/crew` and `/crew` are the same command.
 
-    /agent                  where it is and what it is doing
-    /agent come             spawn it if needed, and follow you
-    /agent take <item> [n]  hand it some of your items
-    /agent give [item]      have it hand them back
-    /agent do               list the directives it knows
-    /agent do <directive>   carry one out
-    /agent mine <ore> [n]   go and hand-mine some ore
-    /agent stop             stand still, drop the current directive
+    /crew                  where it is and what it is doing
+    /crew come             spawn it if needed, and follow you
+    /crew take <item> [n]  hand it some of your items
+    /crew give [item]      have it hand them back
+    /crew do               list the directives it knows
+    /crew do <directive>   carry one out
+    /crew mine <ore> [n]   go and hand-mine some ore
+    /crew stop             stand still, drop the current directive
 
-`/agent take` exists because Factorio has no way to put items into another
+`/crew take` exists because Factorio has no way to put items into another
 character's inventory -- you cannot open one the way you open a chest. It moves
 your own items across, which is the honest version of handing them over.
 
-`/agent do` cannot read the directive files itself, so the mod queues the request
+`/crew do` cannot read the directive files itself, so the mod queues the request
 and the bridge -- already running alongside the server -- notices it, compiles the
 directive and sets it going. A loop, not a conversation.
 
@@ -77,7 +77,7 @@ directive and sets it going. A loop, not a conversation.
     bridge/crewmate serve -save ~/.factorio/saves/your-save.zip
 
 Then join from the game: Multiplayer → Connect to address → `127.0.0.1`. In game,
-`/agent come` puts a body next to you; `/agent` says where it is and what it thinks
+`/crew come` puts a body next to you; `/crew` says where it is and what it thinks
 it is doing.
 
 The server keeps its own write-data directory (`~/.local/share/factorio-crewmate`)
@@ -201,6 +201,10 @@ whole thing over in one call.
   fails. The body steps off a footprint before building it.
 - A directive that reports "done" when the pole run never joined up is worse than
   one that admits it, which is what `check_power` is for.
+- A character with no player attached will not hold the **mining animation**
+  either: the engine clears `mining_state` every tick and re-asserting it does not
+  stick. It says what it is doing in text above its head instead, because standing
+  motionless while ore quietly disappears looks exactly like being stuck.
 - A character with no player attached **ignores `mining_state`** -- that logic
   lives in the player controller. Digging is scripted instead, but paced by the
   game's own numbers: the ore's mining time over the character's mining speed, one

@@ -17,7 +17,7 @@ going; this file is how to work on it.
 
 ## The shape of the thing
 
-The character is called **Agent**, not after any model, because a model is not
+The character is called **Crew**, not after any model, because a model is not
 what drives it. Work belongs in scripted loops, not in a model's context. A directive runs from a
 data file through the mod's own tick handler; nothing calls out to an agent to
 decide the next step. When something goes wrong the runner stops, records why, and
@@ -33,6 +33,8 @@ going the wrong way.
 - Every interface call returns `{ok, result}` or `{ok=false, error}`.
 - A game-side failure is a tool result flagged `isError`, never a protocol error:
   the model should read the message and act on it.
+- If it is going to take more than a few seconds, it must say so and show
+  progress. Silent work is indistinguishable from broken work.
 - Prefer a condition to a decision made elsewhere. If a directive needs to know
   whether to do something, that belongs in `when`, not in a prompt.
 - Directives are data. A new goal should be a new file in `directives/`, not new

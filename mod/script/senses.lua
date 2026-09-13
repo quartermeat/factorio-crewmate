@@ -132,6 +132,8 @@ function Senses.status()
       position = body.position,
       health = body.health,
       max_health = body.max_health,
+      sign = Body.showing(),
+      walking = body.walking_state and body.walking_state.walking or false,
       doing = state.follow and ("following " .. (game.get_player(state.follow) and game.get_player(state.follow).name or "?"))
               or state.goal and string.format("walking to %.0f,%.0f", state.goal.x, state.goal.y)
               or "idle",

@@ -4,10 +4,10 @@
 
 local Body = {}
 
--- Deliberately generic: this is a scripted agent that runs directives on its own.
--- An operator -- a person, or a model asked for help -- is the exception, not the
--- thing driving it.
-local NAME = "Agent"
+-- Not named after any model: this is a scripted crewmate that runs directives on
+-- its own, and an operator -- a person, or a model asked for help -- is the
+-- exception rather than the thing driving it.
+local NAME = "Crew"
 local COLOR = {r = 0.85, g = 0.55, b = 0.30}
 local ARRIVAL = 1.5      -- tiles; close enough to call it arrived
 local FOLLOW_GAP = 4     -- tiles; how far behind a player it trails
@@ -249,6 +249,38 @@ local function step(state, body)
     state.stuck_since = nil
   end
   state.last_position = {x = body.position.x, y = body.position.y}
+end
+
+-- A player-less character will not hold the mining animation: the engine clears
+-- mining_state every tick, and setting it again each tick does not make it stick.
+-- So say what it is doing in text above its head instead. Standing motionless
+-- while ore quietly disappears looks broken; a sign saying "mining coal 34/100"
+-- does not.
+function Body.sign(text)
+  local state = crew()
+  if state.sign_id then
+    local existing = rendering.get_object_by_id(state.sign_id)
+    if existing then existing.destroy() end
+    state.sign_id = nil
+  end
+  state.sign_text = text
+  local body = Body.get()
+  if not (text and body) then return end
+  local object = rendering.draw_text
+  {
+    text = text,
+    surface = body.surface,
+    target = {entity = body, offset = {0, -1.9}},
+    color = {r = 0.9, g = 0.9, b = 0.9},
+    scale = 0.9,
+    alignment = "center",
+    scale_with_zoom = false,
+  }
+  state.sign_id = object.id
+end
+
+function Body.showing()
+  return crew().sign_text
 end
 
 script.on_event(defines.events.on_tick, function()

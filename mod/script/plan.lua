@@ -27,6 +27,7 @@ local function record(plan, outcome, detail)
 end
 
 local function fail(plan, reason)
+  Body.sign(nil)
   plan.state = "failed"
   plan.error = reason
   record(plan, "failed", reason)
@@ -432,6 +433,7 @@ HANDLERS.mine = function(plan, body, step)
   local carried = Hands.carrying(body, item)
 
   if carried >= target then
+    Body.sign(nil)
     Hands.stop_mining(body)
     Body.halt()
     record(plan, "mined", string.format("%d %s", carried, item))
@@ -452,6 +454,7 @@ HANDLERS.mine = function(plan, body, step)
   end
 
   if not closest then
+    Body.sign(nil)
     Hands.stop_mining(body)
     Body.halt()
     if carried == 0 then return fail(plan, "there is no " .. resource .. " left around here") end
@@ -464,6 +467,7 @@ HANDLERS.mine = function(plan, body, step)
   local reached, reason, position = Hands.reach_ore(body, closest)
   if not reached then
     if reason == "walking" then
+      Body.sign(nil)
       Hands.stop_mining(body)
       Body.walk_to(position)
       return
@@ -472,11 +476,26 @@ HANDLERS.mine = function(plan, body, step)
   end
   Body.halt()
 
+  -- Say how long this is going to take, once, and then how it is going. Three
+  -- minutes of silent standing looks exactly like three minutes of being stuck.
+  local interval_ticks = Hands.mining_ticks(resource)
+  if not plan.mine_started then
+    plan.mine_started = true
+    plan.mine_announced = carried
+    local seconds = math.floor((target - carried) * interval_ticks / 60)
+    announce(string.format("digging %d %s -- about %d:%02d at hand-mining speed.",
+      target - carried, item, math.floor(seconds / 60), seconds % 60))
+  end
+  if carried - (plan.mine_announced or 0) >= math.max(10, math.floor(target / 4)) then
+    plan.mine_announced = carried
+    announce(string.format("%d of %d %s.", carried, target, item))
+  end
+  Body.sign(string.format("mining %s  %d/%d", item, carried, target))
+
   -- One swing per the ore's own mining time, so a hundred coal takes as long as
   -- a hundred coal should.
-  local interval = Hands.mining_ticks(resource)
   if plan.mine_next and game.tick < plan.mine_next then return end
-  plan.mine_next = game.tick + interval
+  plan.mine_next = game.tick + interval_ticks
 
   local mined, why = Hands.mine_one(body, closest)
   if not mined then
@@ -522,6 +541,7 @@ function Plan.start(argument)
 end
 
 function Plan.cancel()
+  Body.sign(nil)
   local plan = crew().plan
   if plan and plan.state == "running" then
     plan.state = "cancelled"
