@@ -46,5 +46,11 @@
       "do": "say",
       "message": "Power block is up and burning. Run a pole line from it when you want it."
     }
+  ],
+  "requires_recipes": [
+    "offshore-pump",
+    "boiler",
+    "steam-engine",
+    "medium-electric-pole"
   ]
 }

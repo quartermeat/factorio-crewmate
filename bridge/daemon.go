@@ -64,7 +64,11 @@ func (d *Daemon) publishCatalogue(game *Game) error {
 	}
 	listed := make([]map[string]any, 0, len(known))
 	for _, directive := range known {
-		listed = append(listed, map[string]any{"name": directive.Name, "title": directive.Title})
+		listed = append(listed, map[string]any{
+			"name":     directive.Name,
+			"title":    directive.Title,
+			"requires": directive.Requires,
+		})
 	}
 	if _, err := game.Call("set_catalogue", map[string]any{"directives": listed}); err != nil {
 		return err

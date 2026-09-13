@@ -22,7 +22,10 @@ type Directive struct {
 	Align       string               `json:"align"`
 	Parameters  map[string]Parameter `json:"parameters"`
 	Supplies    []json.RawMessage    `json:"supplies"`
-	Steps       []map[string]any     `json:"steps"`
+	// Recipes that must be unlocked for this to be possible at all. The game
+	// decides whether they are; this is just the list to ask about.
+	Requires []string         `json:"requires_recipes"`
+	Steps    []map[string]any `json:"steps"`
 }
 
 type Anchor struct {

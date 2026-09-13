@@ -167,6 +167,7 @@ still works -- `/crew mine uranium-ore` goes through `gather` directly.
 
 ### Making things
 
+    /crew make                lists what it can make, and what each would take
     /crew make furnace        works out it needs 5 stone, digs it, crafts it
     /crew make chest 4
     /crew make belt 20
@@ -176,10 +177,29 @@ to raw materials, spends whatever is already in its pockets on the way down, and
 then **rewrites the plan**: the digging it turns out to need is spliced in ahead of
 the crafting. The plan is data, so a step can write more steps.
 
+`/crew make` on its own answers honestly for the moment it is asked: empty-handed
+on Nauvis that is two things, a stone furnace and a wooden chest, because
+everything else wants a plate and a plate wants a furnace. Hand it two hundred
+iron plates and the same question offers nine.
+
 Only recipes a pair of hands can do. Anything wanting a furnace or an assembler is
 refused before a shovel is lifted, and the refusal names what it was short of:
 
     iron-chest needs 8 iron-plate, and I cannot make those by hand
+
+### Only what this game has unlocked
+
+Neither list offers anything the tech tree has not reached. For crafting the game
+already answers that -- `LuaRecipe.enabled` is per force and false until the
+research is done -- so nothing here reimplements it. Directives declare the
+recipes they depend on:
+
+```json
+"requires_recipes": ["offshore-pump", "boiler", "steam-engine", "medium-electric-pole"]
+```
+
+and `/crew do` shows the rest under "not yet", naming the recipe that is missing,
+rather than letting you start a job that cannot finish.
 
 ### Deciding what to do next
 
@@ -239,6 +259,9 @@ whole thing over in one call.
   fails. The body steps off a footprint before building it.
 - A directive that reports "done" when the pole run never joined up is worse than
   one that admits it, which is what `check_power` is for.
+- Hand-craftability is **not** `category == "crafting"`. In Space Age a transport
+  belt is category `"pressing"` and hands can still make one. The character
+  prototype's `crafting_categories` is the only correct answer.
 - Only a `resource` has an `amount`. Asking a tree for one is an error, not a
   nil, so ore comes up a unit at a time while a tree comes up whole.
 - Ore behind water or a cliff will never be reached, and walking at it forever

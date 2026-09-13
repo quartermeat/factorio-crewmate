@@ -6,6 +6,7 @@ local Senses = require("script.senses")
 local Hands = require("script.hands")
 local Plan = require("script.plan")
 local Works = require("script.works")
+local Craft = require("script.craft")
 
 local function ok(value)
   return helpers.table_to_json({ok = true, result = value or {}})
@@ -162,6 +163,13 @@ local interface =
     return ok({name = Body.NAME})
   end),
 
+  craftable = guarded(function(argument)
+    local body = Body.get()
+    if not body then return fail("no body in the world") end
+    local listed, total = Craft.craftable(body, argument.limit)
+    return ok({craftable = listed, total = total})
+  end),
+
   catalogue = guarded(function()
     return ok({directives = (storage.crew or {}).catalogue or {}})
   end),
@@ -243,6 +251,16 @@ end
 
 -- /crew do queues a directive by name. Nothing here knows what the directives
 -- are; the bridge polls for these and does the rest.
+-- Whether the game has unlocked everything a directive depends on. The recipes
+-- carry the answer already: a recipe is disabled until its research is done.
+local function unlocked(force, entry)
+  for _, recipe in pairs(entry.requires or {}) do
+    local known = force.recipes[recipe]
+    if not known or not known.enabled then return false, recipe end
+  end
+  return true
+end
+
 local function request_directive(player, parameter, parameters)
   storage.crew = storage.crew or {}
   local catalogue = storage.crew.catalogue or {}
@@ -253,16 +271,32 @@ local function request_directive(player, parameter, parameters)
       player.print("[Crew] I have no directives loaded -- is the bridge running?")
       return
     end
+    local locked = {}
     player.print("[Crew] I know how to:")
     for _, entry in pairs(catalogue) do
-      player.print(string.format("  /crew do %s  --  %s", entry.name, entry.title or ""))
+      local available, missing = unlocked(player.force, entry)
+      if available then
+        player.print(string.format("  /crew do %s  --  %s", entry.name, entry.title or ""))
+      else
+        locked[#locked + 1] = string.format("%s (needs %s)", entry.name, missing)
+      end
+    end
+    if #locked > 0 then
+      player.print("[Crew] not yet: " .. table.concat(locked, ", "))
     end
     return
   end
 
   local known = false
   for _, entry in pairs(catalogue) do
-    if entry.name == name then known = true end
+    if entry.name == name then
+      known = true
+      local available, missing = unlocked(player.force, entry)
+      if not available then
+        player.print(string.format("[Crew] %s needs %s, which is not unlocked yet.", name, missing))
+        return
+      end
+    end
   end
   if not known and #catalogue > 0 then
     player.print("[Crew] I do not know a directive called '" .. name .. "'. Try /crew do.")
@@ -339,7 +373,21 @@ local function request_making(player, parameter)
   local item, count = parameter:match("^(%S*)%s*(%d*)$")
   item = normalise(item or "")
   if item == "" then
-    player.print("[Crew] make what? Try /crew make furnace 2.")
+    -- Same manners as /crew do with nothing after it: say what is on offer.
+    local body = Body.get()
+    if not body then
+      player.print("[Crew] I have no body here -- /crew come first.")
+      return
+    end
+    local listed, total = Craft.craftable(body, 24)
+    player.print(string.format("[Crew] I can make %d things by hand from what I can dig up:", total))
+    for _, entry in pairs(listed) do
+      player.print(string.format("  /crew make %s  --  %s", entry.name, entry.needs))
+    end
+    if total > #listed then
+      player.print(string.format("  ...and %d more; name any of them.", total - #listed))
+    end
+    player.print("[Crew] short names work too: furnace, chest, belt, pole, drill.")
     return
   end
   local parameters = {item = ITEM_NAMES[item] or item}
@@ -356,7 +404,7 @@ local HELP =
   "/crew give [item]      -- hand them back",
   "/crew do [directive]   -- list directives, or carry one out",
   "/crew mine <ore> [n]   -- go and hand-mine some ore",
-  "/crew make <thing> [n] -- make something, digging up what it needs first",
+  "/crew make [thing] [n] -- list what I can make, or make one",
 }
 
 local function run_command(command)

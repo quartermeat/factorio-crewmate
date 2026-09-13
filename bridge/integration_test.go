@@ -911,3 +911,138 @@ func TestIntegrationMakeRefusesWhatHandsCannotDo(t *testing.T) {
 	}
 	t.Logf("refused politely: %s", status.Error)
 }
+
+// /crew make with nothing after it should offer options, the way /crew do does,
+// and only offer things it could genuinely produce from the ground up.
+func TestIntegrationMakeListsWhatItCanActuallyMake(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := game.Call("craftable", map[string]any{})
+	if err != nil {
+		t.Fatalf("craftable: %v", err)
+	}
+	var listing struct {
+		Craftable []struct {
+			Name  string `json:"name"`
+			Needs string `json:"needs"`
+		} `json:"craftable"`
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(raw, &listing); err != nil {
+		t.Fatalf("craftable shape: %s", raw)
+	}
+	if listing.Total == 0 {
+		t.Fatal("it thinks it can make nothing at all")
+	}
+
+	found := map[string]string{}
+	for _, entry := range listing.Craftable {
+		found[entry.Name] = entry.Needs
+	}
+	if needs, listed := found["stone-furnace"]; !listed {
+		t.Fatalf("a stone furnace is five stone and should be on the list: %v", found)
+	} else if !strings.Contains(needs, "stone") {
+		t.Fatalf("stone-furnace listed as needing %q", needs)
+	}
+	// Anything wanting a plate wants a furnace, and belongs nowhere near this list
+	// while its pockets are empty.
+	emptyHanded := listing.Total
+	for _, refused := range []string{"iron-chest", "transport-belt", "inserter"} {
+		if needs, listed := found[refused]; listed {
+			t.Fatalf("%s cannot be hand-made from raw materials but was offered (needs %q)", refused, needs)
+		}
+	}
+
+	// Hand it plates, and the offer should grow: that is the honest answer to
+	// "what can you make" at any given moment.
+	if _, err := game.client.Exec(`/sc local b = game.surfaces.nauvis.find_entities_filtered{name="character"}[1] ` +
+		`b.insert{name="iron-plate", count=200} rcon.print("given")`); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = game.Call("craftable", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	json.Unmarshal(raw, &listing)
+	withPlates := map[string]bool{}
+	for _, entry := range listing.Craftable {
+		withPlates[entry.Name] = true
+	}
+	if !withPlates["transport-belt"] {
+		t.Fatalf("given 200 iron plates it still will not offer a transport belt: %d offers", listing.Total)
+	}
+	if listing.Total <= emptyHanded {
+		t.Fatalf("holding plates should widen the offer: %d then %d", emptyHanded, listing.Total)
+	}
+	t.Logf("offers %d empty-handed (stone-furnace: %s), %d holding plates",
+		emptyHanded, found["stone-furnace"], listing.Total)
+}
+
+// Nothing should be offered that this game has not unlocked. For crafting the
+// game already answers that -- a recipe is disabled until its research is done --
+// so the test proves the listing honours it rather than reimplementing it.
+func TestIntegrationOffersOnlyWhatIsUnlocked(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatal(err)
+	}
+
+	offers := func() map[string]bool {
+		t.Helper()
+		raw, err := game.Call("craftable", map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var listing struct {
+			Craftable []struct {
+				Name string `json:"name"`
+			} `json:"craftable"`
+		}
+		json.Unmarshal(raw, &listing)
+		names := map[string]bool{}
+		for _, entry := range listing.Craftable {
+			names[entry.Name] = true
+		}
+		return names
+	}
+
+	if !offers()["wooden-chest"] {
+		t.Fatal("a wooden chest is two wood and should be on offer in a fresh game")
+	}
+
+	// Lock it the way an unresearched recipe is locked.
+	if _, err := game.client.Exec(`/sc game.forces.player.recipes["wooden-chest"].enabled = false rcon.print("locked")`); err != nil {
+		t.Fatal(err)
+	}
+	if offers()["wooden-chest"] {
+		t.Fatal("a locked recipe is still being offered: the listing is not honouring the tech tree")
+	}
+
+	// And a directive that needs a locked recipe should be held back too.
+	if _, err := game.client.Exec(`/sc game.forces.player.recipes["steam-engine"].enabled = false rcon.print("locked")`); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := game.client.Exec(`/sc local force = game.forces.player ` +
+		`rcon.print(helpers.table_to_json{steam = force.recipes["steam-engine"].enabled, chest = force.recipes["wooden-chest"].enabled})`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var locks struct {
+		Steam bool `json:"steam"`
+		Chest bool `json:"chest"`
+	}
+	json.Unmarshal([]byte(strings.TrimSpace(raw)), &locks)
+	if locks.Steam || locks.Chest {
+		t.Fatalf("expected both recipes locked, got %+v", locks)
+	}
+	t.Log("locked recipes disappear from what it offers")
+}

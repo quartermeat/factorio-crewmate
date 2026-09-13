@@ -112,5 +112,14 @@
       "do": "say",
       "message": "Loop closed: the drills run on steam from the coal they are mining."
     }
+  ],
+  "requires_recipes": [
+    "offshore-pump",
+    "boiler",
+    "steam-engine",
+    "medium-electric-pole",
+    "electric-mining-drill",
+    "transport-belt",
+    "inserter"
   ]
 }

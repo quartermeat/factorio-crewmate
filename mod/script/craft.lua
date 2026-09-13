@@ -19,16 +19,24 @@ Craft.MINEABLE =
   wood = {resource = "tree", kind = "type"},
 }
 
--- Only what a pair of hands can make: anything wanting a furnace or an
--- assembler is somebody else's problem, and saying so is more use than failing
--- halfway through.
+-- Only what a pair of hands can make. Which categories those are is not a guess:
+-- the character prototype says so, and in Space Age the answer is wider than
+-- "crafting" -- a transport belt is category "pressing" and hands can still make
+-- one.
+local function hand_categories()
+  local character = prototypes.entity["character"]
+  return (character and character.crafting_categories) or {crafting = true}
+end
+
+local function by_hand(recipe)
+  return recipe.enabled and not recipe.hidden and hand_categories()[recipe.category] ~= nil
+end
+
 local function hand_recipe(force, item)
   local recipe = force.recipes[item]
-  if recipe and recipe.enabled and not recipe.hidden and recipe.category == "crafting" then
-    return recipe
-  end
+  if recipe and by_hand(recipe) then return recipe end
   for _, candidate in pairs(force.recipes) do
-    if candidate.enabled and not candidate.hidden and candidate.category == "crafting" then
+    if by_hand(candidate) then
       for _, product in pairs(candidate.products) do
         if product.name == item and (product.amount or 1) > 0 then return candidate end
       end
@@ -105,6 +113,56 @@ function Craft.requirements(body, item, count)
   table.sort(needed, function(a, b) return a.name < b.name end)
   table.sort(short, function(a, b) return a.name < b.name end)
   return {item = item, count = count, mine = needed, cannot_make = short}
+end
+
+-- Everything it could actually make from scratch: a hand recipe whose ingredients
+-- bottom out in things it knows how to dig up. Anything wanting a plate is left
+-- out, because wanting a plate means wanting a furnace.
+function Craft.craftable(body, limit)
+  local force = body.force
+  local listed = {}
+
+  -- What it is carrying counts: hand it fifty iron plates and the list of things
+  -- it can make grows, which is the honest answer to "what can you make".
+  local carried = {}
+  local inventory = body.get_main_inventory()
+  for _, stack in pairs(inventory and inventory.get_contents() or {}) do
+    carried[stack.name] = (carried[stack.name] or 0) + stack.count
+  end
+
+  for _, recipe in pairs(force.recipes) do
+    if by_hand(recipe) then
+      local product = recipe.products[1]
+      if product and product.type == "item" then
+        local stock = {}
+        for name, amount in pairs(carried) do stock[name] = amount end
+
+        local raw, blocked = {}, {}
+        expand(force, stock, product.name, 1, raw, blocked, 0)
+        if next(blocked) == nil then
+          local parts = {}
+          for material, amount in pairs(raw) do
+            parts[#parts + 1] = string.format("%d %s", amount, material)
+          end
+          table.sort(parts)
+          listed[#listed + 1] =
+          {
+            name = product.name,
+            needs = #parts > 0 and table.concat(parts, ", ") or "nothing more -- I have the parts",
+            ready = #parts == 0,
+          }
+        end
+      end
+    end
+  end
+
+  table.sort(listed, function(a, b) return a.name < b.name end)
+  if limit and #listed > limit then
+    local trimmed = {}
+    for index = 1, limit do trimmed[index] = listed[index] end
+    return trimmed, #listed
+  end
+  return listed, #listed
 end
 
 -- Craft what is already payable for; returns how many were started.
