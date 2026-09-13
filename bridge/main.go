@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const version = "0.5.0"
+const version = "0.6.0"
 
 var (
 	address    = flag.String("rcon", "127.0.0.1:27015", "address of the game's RCON port")
@@ -322,6 +322,13 @@ func serve() error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "crewmate: hosting %s, rcon on %s; join at 127.0.0.1\n", filepath.Base(*save), *address)
+
+	// Watch for directives asked for from inside the game, for as long as the
+	// server is up.
+	stopDaemon := make(chan struct{})
+	defer close(stopDaemon)
+	daemon := &Daemon{Address: *address, Password: secret(), Directives: *directives}
+	go daemon.Run(stopDaemon)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)

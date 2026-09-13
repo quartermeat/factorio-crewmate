@@ -39,6 +39,13 @@ going the wrong way.
 - New tools need a description that says what the answer is good for, not just
   what the function is called.
 
+## Two script contexts
+
+`/c` and `/sc` run in the **scenario's** script, not the mod's: `storage` there is
+the scenario's, and the mod's own state is invisible. Anything that needs to see
+mod state goes through `remote.call("crewmate", ...)`, tests included. This costs
+an hour if you learn it the hard way.
+
 ## Testing
 
     cd bridge && go test ./...

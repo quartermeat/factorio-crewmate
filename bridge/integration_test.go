@@ -382,3 +382,75 @@ func TestIntegrationDirectiveClosesTheCoalLoop(t *testing.T) {
 		t.Fatal("the drills are not on the engines' electric network: the loop is not closed")
 	}
 }
+
+// Giving a directive from inside the game: the mod queues the request, the
+// daemon notices and compiles it. No model anywhere in the path.
+func TestIntegrationInGameRequestStartsADirective(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	supply := `/sc local body = game.surfaces.nauvis.find_entities_filtered{name="character"}[1] ` +
+		`body.insert{name="offshore-pump", count=1} body.insert{name="boiler", count=1} body.insert{name="steam-engine", count=3} ` +
+		`body.insert{name="medium-electric-pole", count=3} body.insert{name="coal", count=200} rcon.print("supplied")`
+	if _, err := game.client.Exec(supply); err != nil {
+		t.Fatal(err)
+	}
+
+	daemon := &Daemon{
+		Address:    game.client.(*RCON).conn.RemoteAddr().String(),
+		Password:   "integration",
+		Directives: "../directives",
+		Interval:   time.Second,
+	}
+	stop := make(chan struct{})
+	defer close(stop)
+	go daemon.Run(stop)
+
+	// The catalogue has to reach the game, or /crew do cannot list anything.
+	// Note this is asked for through the mod's own interface: a /sc command runs
+	// in the scenario's script context, where the mod's storage is not visible.
+	var listed string
+	for attempt := 0; attempt < 20; attempt++ {
+		time.Sleep(time.Second)
+		raw, err := game.Call("catalogue", nil)
+		if err == nil && strings.Contains(string(raw), "coal-to-power") {
+			listed = string(raw)
+			break
+		}
+	}
+	if listed == "" {
+		t.Fatal("the daemon never published the directive catalogue to the game")
+	}
+
+	// Stand in for a player typing /crew do coal-to-power: the command queues a
+	// request exactly like this one.
+	if _, err := game.Call("request", map[string]any{"directive": "coal-to-power", "player": "test"}); err != nil {
+		t.Fatalf("queueing the request: %v", err)
+	}
+
+	var status struct {
+		State string `json:"state"`
+		Name  string `json:"name"`
+	}
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		raw, err := game.Call("plan_status", nil)
+		if err != nil {
+			t.Fatalf("plan_status: %v", err)
+		}
+		json.Unmarshal(raw, &status)
+		if status.State == "running" || status.State == "done" {
+			break
+		}
+	}
+	if status.Name != "coal-to-power" {
+		t.Fatalf("the request never became a running directive: %+v", status)
+	}
+	t.Logf("in-game request started %q (%s)", status.Name, status.State)
+}

@@ -52,6 +52,25 @@ password to `~/.config/crewmate/env`. It prints the one command you run yourself
 
 ## Playing
 
+### From inside the game
+
+    /crew                  where it is and what it is doing
+    /crew come             spawn it if needed, and follow you
+    /crew take <item> [n]  hand it some of your items
+    /crew give [item]      have it hand them back
+    /crew do               list the directives it knows
+    /crew do <directive>   carry one out
+    /crew stop             stand still, drop the current directive
+
+`/crew take` exists because Factorio has no way to put items into another
+character's inventory -- you cannot open one the way you open a chest. It moves
+your own items across, which is the honest version of handing them over.
+
+`/crew do` cannot read the directive files itself, so the mod queues the request
+and the bridge -- already running alongside the server -- notices it, compiles the
+directive and sets it going. A loop, not a conversation.
+
+
     bridge/crewmate serve -save ~/.factorio/saves/your-save.zip
 
 Then join from the game: Multiplayer → Connect to address → `127.0.0.1`. In game,
@@ -190,8 +209,8 @@ too, but this mod has no data stage, so that rarely comes up.
   *Done.*
 - **v0.5 — the bootstrap loop.** Coal to steam to electric mining, marked out and
   built unattended, and checked afterwards. *Done.*
-- **v0.6 — in-game control.** `/crew do <directive>` and `/crew take <item>`, so a
-  directive can be given and supplied without leaving the game.
+- **v0.6 — in-game control.** Give and supply a directive without leaving the
+  game. *Done.*
 - **v0.7 — a sense of place.** Remembers the base: named areas, what it built,
   what it was asked to leave alone.
 - **v0.8 — initiative.** Standing orders it acts on — keep turrets fed, fix the
