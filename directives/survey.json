@@ -1,0 +1,17 @@
+{
+  "name": "survey",
+  "title": "Report what is nearby",
+  "description": "Looks around for every raw material it knows how to dig and says how far away each one is.",
+  "parameters": {
+    "reach": {
+      "default": 512,
+      "description": "how far to look"
+    }
+  },
+  "steps": [
+    {
+      "do": "survey",
+      "radius": "$reach"
+    }
+  ]
+}

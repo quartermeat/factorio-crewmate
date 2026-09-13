@@ -46,6 +46,12 @@ end
 -- The nametag is a render object made when the body was spawned, and it outlives
 -- a rename: changing the constant does nothing to one already sitting in a save.
 -- Redrawing it on load is what actually renames him.
+-- One place that knows how the agent's voice looks in chat.
+function Body.say(message)
+  game.print(string.format("[color=%f,%f,%f][%s][/color] %s",
+    COLOR.r, COLOR.g, COLOR.b, NAME, message))
+end
+
 function Body.relabel()
   local body = Body.get()
   if body then label(body) end

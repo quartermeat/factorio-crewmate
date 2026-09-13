@@ -1,0 +1,21 @@
+{
+  "name": "explore",
+  "title": "Go and have a look",
+  "description": "Walks a leg outward into the least-seen direction and reports anything new. A character charts the ground it walks over, so this is how the map grows.",
+  "parameters": {
+    "distance": {
+      "default": 120,
+      "description": "how far to walk before looking around"
+    }
+  },
+  "steps": [
+    {
+      "do": "explore",
+      "distance": "$distance"
+    },
+    {
+      "do": "survey",
+      "radius": 256
+    }
+  ]
+}

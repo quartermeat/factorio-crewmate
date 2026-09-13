@@ -18,18 +18,20 @@ import (
 	"time"
 )
 
-const version = "0.11.1"
+const version = "0.12.0"
 
 var (
-	address    = flag.String("rcon", "127.0.0.1:27015", "address of the game's RCON port")
-	password   = flag.String("password", "", "RCON password (default: $CREWMATE_RCON_PASSWORD)")
-	save       = flag.String("save", filepath.Join(home(), ".factorio/saves/fast-forward-fleet.zip"), "save to host, for `serve`")
-	executable = flag.String("factorio", filepath.Join(home(), ".steam/steam/steamapps/common/Factorio/bin/x64/factorio"), "factorio executable")
-	data       = flag.String("data", filepath.Join(home(), ".local/share/factorio-crewmate"), "write-data directory for the hosted server")
-	mods       = flag.String("mods", filepath.Join(home(), ".factorio/mods"), "mod directory the server loads")
-	watch      = flag.String("watch", "", "directory to watch; when a file changes, save and restart the server so mod edits take effect")
-	gamePort   = flag.Int("port", 34197, "UDP port the game itself listens on; change it to host a second world")
-	directives = flag.String("directives", defaultDirectives(), "directory of directive files")
+	address       = flag.String("rcon", "127.0.0.1:27015", "address of the game's RCON port")
+	password      = flag.String("password", "", "RCON password (default: $CREWMATE_RCON_PASSWORD)")
+	save          = flag.String("save", filepath.Join(home(), ".factorio/saves/fast-forward-fleet.zip"), "save to host, for `serve`")
+	executable    = flag.String("factorio", filepath.Join(home(), ".steam/steam/steamapps/common/Factorio/bin/x64/factorio"), "factorio executable")
+	data          = flag.String("data", filepath.Join(home(), ".local/share/factorio-crewmate"), "write-data directory for the hosted server")
+	mods          = flag.String("mods", filepath.Join(home(), ".factorio/mods"), "mod directory the server loads")
+	watch         = flag.String("watch", "", "directory to watch; when a file changes, save and restart the server so mod edits take effect")
+	fresh         = flag.Bool("fresh", false, "generate a new world before hosting, keeping the old save alongside it")
+	gamePort      = flag.Int("port", 34197, "UDP port the game itself listens on; change it to host a second world")
+	directives    = flag.String("directives", defaultDirectives(), "directory of directive files")
+	personalities = flag.String("personalities", filepath.Join(filepath.Dir(defaultDirectives()), "personalities"), "directory of personality files")
 )
 
 func home() string {
@@ -75,6 +77,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `crewmate %s -- a bridge between an agent and a running Factorio game.
 
   crewmate serve          host the save as a server with RCON open, so a client can join it
+  crewmate serve -fresh   generate a new world first, keeping the old one alongside
   crewmate stop           stop the server this bridge started, and nothing else
   crewmate serve -watch mod   the same, restarting on every mod edit
   crewmate mcp            run as an MCP server on stdio, for Claude Code to drive
@@ -277,6 +280,11 @@ func serve() error {
 	if secret() == "" {
 		return fmt.Errorf("no RCON password; set CREWMATE_RCON_PASSWORD or pass -password")
 	}
+	if *fresh {
+		if err := newWorld(config(), *save); err != nil {
+			return err
+		}
+	}
 	if _, err := os.Stat(*save); err != nil {
 		return fmt.Errorf("save not found: %s", *save)
 	}
@@ -284,11 +292,10 @@ func serve() error {
 		return err
 	}
 
-	config := filepath.Join(*data, "config.ini")
-	contents := fmt.Sprintf("[path]\nread-data=__PATH__executable__/../../data\nwrite-data=%s\n", *data)
-	if err := os.WriteFile(config, []byte(contents), 0o644); err != nil {
+	if err := writeConfig(); err != nil {
 		return err
 	}
+	config := config()
 
 	settings := filepath.Join(*data, "server-settings.json")
 	if err := os.WriteFile(settings, serverSettings(), 0o644); err != nil {
@@ -333,7 +340,7 @@ func serve() error {
 	// server is up.
 	stopDaemon := make(chan struct{})
 	defer close(stopDaemon)
-	daemon := &Daemon{Address: *address, Password: secret(), Directives: *directives}
+	daemon := &Daemon{Address: *address, Password: secret(), Directives: *directives, Personalities: *personalities}
 	go daemon.Run(stopDaemon)
 
 	stop := make(chan os.Signal, 1)
@@ -434,6 +441,39 @@ func snapshot(directory string) map[string]time.Time {
 		return nil
 	})
 	return files
+}
+
+func config() string {
+	return filepath.Join(*data, "config.ini")
+}
+
+func writeConfig() error {
+	if err := os.MkdirAll(*data, 0o755); err != nil {
+		return err
+	}
+	contents := fmt.Sprintf("[path]\nread-data=__PATH__executable__/../../data\nwrite-data=%s\n", *data)
+	return os.WriteFile(config(), []byte(contents), 0o644)
+}
+
+// Testing wants a world nobody has touched. The old one is kept next to it rather
+// than thrown away: a save is cheap and losing a play test is not.
+func newWorld(config, save string) error {
+	if err := writeConfig(); err != nil {
+		return err
+	}
+	if _, err := os.Stat(save); err == nil {
+		kept := strings.TrimSuffix(save, ".zip") + time.Now().Format("-2006-01-02-1504") + ".zip"
+		if err := os.Rename(save, kept); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "crewmate: kept the old world as %s\n", filepath.Base(kept))
+	}
+	make := exec.Command(*executable, "--create", save, "--config", config, "--mod-directory", *mods)
+	if output, err := make.CombinedOutput(); err != nil {
+		return fmt.Errorf("could not generate a world: %w\n%s", err, output)
+	}
+	fmt.Fprintf(os.Stderr, "crewmate: generated a new world at %s\n", filepath.Base(save))
+	return nil
 }
 
 // A pid file, so stopping this server does not mean hunting for factorio

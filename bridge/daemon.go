@@ -12,10 +12,11 @@ import (
 // from inside the game costs nothing but the electricity, and never needs a model
 // in the middle of it.
 type Daemon struct {
-	Address    string
-	Password   string
-	Directives string
-	Interval   time.Duration
+	Address       string
+	Password      string
+	Directives    string
+	Personalities string
+	Interval      time.Duration
 }
 
 func (d *Daemon) Run(stop <-chan struct{}) {
@@ -73,7 +74,19 @@ func (d *Daemon) publishCatalogue(game *Game) error {
 	if _, err := game.Call("set_catalogue", map[string]any{"directives": listed}); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "crewmate: watching for /crew do, %d directives loaded\n", len(listed))
+
+	people, err := LoadPersonalities(d.Personalities)
+	if err == nil && len(people) > 0 {
+		crew := make([]*Personality, 0, len(people))
+		for _, person := range people {
+			crew = append(crew, person)
+		}
+		if _, err := game.Call("set_personalities", map[string]any{"personalities": crew}); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(os.Stderr, "crewmate: watching for /crew do, %d directives and %d personalities loaded\n",
+		len(listed), len(people))
 	return nil
 }
 

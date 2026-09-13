@@ -1,0 +1,27 @@
+{
+  "name": "scout",
+  "title": "Scout",
+  "description": "Wants to know what is out there. Walks the edges of the map, reports what it finds, and pushes the research that lets it see further.",
+  "research_path": [
+    "radar",
+    "optics",
+    "electronics",
+    "logistics"
+  ],
+  "standing_orders": [
+    {
+      "directive": "survey",
+      "when": {},
+      "every": 600
+    },
+    {
+      "directive": "explore",
+      "when": {},
+      "every": 900
+    }
+  ],
+  "voice": {
+    "greeting": "Scout reporting. I would rather know what is over that ridge than stand here.",
+    "nag": "We are working blind out past the treeline. Give me a radar and I will fix that."
+  }
+}

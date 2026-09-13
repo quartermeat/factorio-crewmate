@@ -146,6 +146,8 @@ The verbs are `say`, `goto`, `stamp`, `build_ghosts`, `insert`, `place`,
 | `belt_line` | a two-leg belt run from a mark to an entity, ending in an inserter facing it |
 | `pole_line` | poles close enough together to carry power the whole way |
 | `check_power` | confirms two things ended up on the same electric network |
+| `survey` | reports every raw material nearby and how far away it is |
+| `explore` | walks a leg into the least-seen direction; a character charts what it walks over |
 | `mine` | fetches that many more of something, or says why it cannot |
 | `make` | expands a recipe to raw materials and splices the digging into the plan |
 | `craft` | hand-crafts, waiting on the crafting queue |
@@ -206,6 +208,29 @@ recipes they depend on:
 
 and `/crew do` shows the rest under "not yet", naming the recipe that is missing,
 rather than letting you start a job that cannot finish.
+
+## Personalities
+
+    /crew personality                 who it is, and who else it could be
+    /crew personality sparks scout    the first one decides, the second fills in
+    /crew personality none            back to doing only what it is told
+
+A personality is a bias, not a brain: a data file naming a research path and the
+standing orders it keeps when nobody has asked for anything.
+
+- **Sparks** wants the lights on: keeps coal in its pockets, volunteers the steam
+  block, pushes towards electric mining.
+- **Scout** wants to know what is out there: surveys, walks the edges of the map,
+  pushes towards radar.
+
+Two slots, and they are not equal. The primary decides; the secondary fills in
+when the primary has nothing to say. A Sparks who scouts between jobs is a
+different crewmate from a Scout who keeps the lights on.
+
+Research steering is honest about the early Space Age tree, which is mostly not
+research at all: *"steam-power unlocks by crafting 50 iron-plate, not by research
+-- that is the next step."* Knowing the next step is a job for somebody is the
+point of having an opinion about it.
 
 ### Deciding what to do next
 
@@ -321,12 +346,14 @@ too, but this mod has no data stage, so that rarely comes up.
   directive decides its own next step. *Done.*
 - **v0.8 — making things.** Recipes expanded to raw materials, with the gathering
   worked out and inserted by the agent itself. *Done.*
-- **v0.9 — a sense of place.** Remembers the base: named areas, what it built,
+- **v0.9 — personalities.** A research bias and standing orders, in two slots.
+  *Done.*
+- **v0.10 — a sense of place.** Remembers the base: named areas, what it built,
   what it was asked to leave alone.
-- **v0.10 — initiative.** Standing orders it acts on — keep turrets fed, fix the
+- **v0.11 — initiative.** Standing orders it acts on — keep turrets fed, fix the
   brownout, extend the smelter row — and the judgement to ask first when a job is
   bigger than the order.
-- **v0.11 — manners.** An audit log of every action, per-player permissions, and an
+- **v0.12 — manners.** An audit log of every action, per-player permissions, and an
   undo that actually works.
 
 ## Testing

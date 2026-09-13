@@ -61,7 +61,7 @@ function Works.find_resource(body, what, radius, kind)
   local found
 
   local rings = {8, 16, 32, 64, 128, 192, 256, 384, 512}
-  for _, ring in pairs(rings) do
+  for _, ring in ipairs(rings) do
     if ring <= reach then
       local filter = {position = body.position, radius = ring}
       if kind == "type" then filter.type = what else filter.name = what end
@@ -338,7 +338,7 @@ function Works.belt_line(body, argument)
   path[#path + 1] = {position = {x = feed.x, y = feed.y}, direction = path[#path] and path[#path].direction or defines.direction.east}
 
   local ghosts = 0
-  for _, entry in pairs(path) do
+  for _, entry in ipairs(path) do
     if ghost(surface, force, belt, entry.position, entry.direction) then ghosts = ghosts + 1 end
   end
   if ghost(surface, force, argument.inserter or "inserter", inserter.position, inserter.direction) then

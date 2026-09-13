@@ -1,0 +1,35 @@
+{
+  "name": "sparks",
+  "title": "Sparks",
+  "description": "Wants the lights on. Keeps coal in its pockets, volunteers to build the steam block, and pushes the research that leads to electric mining.",
+  "research_path": [
+    "steam-power",
+    "electronics",
+    "automation",
+    "electric-energy-distribution-1",
+    "logistics"
+  ],
+  "standing_orders": [
+    {
+      "directive": "mine-coal",
+      "parameters": {
+        "amount": 50
+      },
+      "when": {
+        "carrying": {
+          "item": "coal",
+          "less_than": 50
+        }
+      },
+      "every": 600
+    }
+  ],
+  "volunteers": [
+    "coal-power-loop",
+    "coal-to-power"
+  ],
+  "voice": {
+    "greeting": "Sparks. Point me at water and coal and I will get the lights on.",
+    "nag": "Burner drills are a stopgap. Say the word and I will put a steam block on the nearest shore."
+  }
+}

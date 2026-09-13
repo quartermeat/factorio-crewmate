@@ -1136,3 +1136,106 @@ func TestIntegrationSaysHowFarTheOreIs(t *testing.T) {
 	}
 	t.Logf("said: %s", err)
 }
+
+// A personality is a bias with consequences: it steers research when the queue is
+// empty, and does its own standing orders when nobody has asked for anything.
+func TestIntegrationPersonalitySteersResearchAndActs(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The bridge would normally push these; do it directly so the test does not
+	// depend on the daemon's timing.
+	people, err := LoadPersonalities("../personalities")
+	if err != nil {
+		t.Fatal(err)
+	}
+	crew := make([]*Personality, 0, len(people))
+	for _, person := range people {
+		crew = append(crew, person)
+	}
+	if _, err := game.Call("set_personalities", map[string]any{"personalities": crew}); err != nil {
+		t.Fatalf("set_personalities: %v", err)
+	}
+
+	// Primary decides; secondary fills in when the primary has nothing to say.
+	if _, err := game.Call("personality", map[string]any{"name": "sparks"}); err != nil {
+		t.Fatalf("adopting sparks: %v", err)
+	}
+	if _, err := game.Call("personality", map[string]any{"name": "scout", "slot": "secondary"}); err != nil {
+		t.Fatalf("adopting scout as secondary: %v", err)
+	}
+
+	// The early Space Age tree is trigger-based, so give it one queueable
+	// technology to actually want.
+	if _, err := game.client.Exec(`/sc game.forces.player.technologies["automation-science-pack"].researched = true rcon.print("ok")`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Research: an empty queue should fill itself from the personality's path.
+	var queued string
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(time.Second)
+		raw, err := game.client.Exec(`/sc local f = game.forces.player ` +
+			`rcon.print(f.current_research and f.current_research.name or "")`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if trimmed := strings.TrimSpace(raw); trimmed != "" {
+			queued = trimmed
+			break
+		}
+	}
+	if queued == "" {
+		t.Fatal("sparks never put anything on the research queue")
+	}
+	wanted := people["sparks"].ResearchPath
+	onPath := false
+	for _, step := range wanted {
+		if step == queued {
+			onPath = true
+		}
+	}
+	t.Logf("sparks queued %q (path: %v, directly on it: %v)", queued, wanted, onPath)
+
+	// Standing orders: empty-handed, sparks wants coal, and should ask for it
+	// without anyone telling it to.
+	var asked, who string
+	deadline = time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		raw, err := game.Call("take_requests", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pending struct {
+			Requests []struct {
+				Directive string `json:"directive"`
+				Standing  bool   `json:"standing"`
+				Player    string `json:"player"`
+			} `json:"requests"`
+		}
+		json.Unmarshal(raw, &pending)
+		for _, request := range pending.Requests {
+			if request.Standing && asked == "" {
+				asked = request.Directive
+				who = request.Player
+			}
+		}
+		if asked != "" {
+			break
+		}
+	}
+	if asked != "mine-coal" {
+		state, _ := game.Call("personality", map[string]any{})
+		carrying, _ := game.Call("carrying", nil)
+		t.Fatalf("sparks should have gone looking for coal on its own; first standing request was %q from %q\nslots: %s\ncarrying: %s",
+			asked, who, state, carrying)
+	}
+	t.Logf("with nothing else on, sparks asked for %s by itself", asked)
+}

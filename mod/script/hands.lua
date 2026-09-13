@@ -244,7 +244,7 @@ function Hands.stamp_aligned(body, argument)
 
   -- Check the whole layout before committing to any of it, so a shore that only
   -- half fits leaves nothing behind to tidy up.
-  for _, entry in pairs(planned) do
+  for _, entry in ipairs(planned) do
     if not surface.can_place_entity
     {
       name = entry.name, position = entry.position, direction = entry.direction,
@@ -255,7 +255,7 @@ function Hands.stamp_aligned(body, argument)
   end
 
   local ghosts = {}
-  for _, entry in pairs(planned) do
+  for _, entry in ipairs(planned) do
     local ghost = surface.create_entity
     {
       name = "entity-ghost", inner_name = entry.name, position = entry.position,

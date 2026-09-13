@@ -6,6 +6,8 @@ local Body = require("script.body")
 local Hands = require("script.hands")
 local Works = require("script.works")
 local Craft = require("script.craft")
+local Personality = require("script.personality")
+local Conditions = require("script.conditions")
 
 local Plan = {}
 
@@ -86,47 +88,6 @@ local function find_thing(plan, body, name, padding)
   end
 end
 
--- Conditions: the small checks that let a directive decide what to do next
--- without asking anyone. Every one of them is a question about the world or the
--- agent's own pockets, answerable on the spot.
-local CONDITIONS = {}
-
-CONDITIONS.carrying = function(plan, body, test)
-  local item = test.item
-  local count = Hands.carrying(body, item)
-  if test.at_least then return count >= test.at_least, string.format("%d %s", count, item) end
-  if test.less_than then return count < test.less_than, string.format("%d %s", count, item) end
-  return count > 0, string.format("%d %s", count, item)
-end
-
-CONDITIONS.exists = function(plan, body, test)
-  local found = body.surface.count_entities_filtered
-  {
-    name = test.entity,
-    position = body.position,
-    radius = test.within or 64,
-    force = body.force,
-  }
-  if test.at_least then return found >= test.at_least, tostring(found) end
-  return found > 0, tostring(found)
-end
-
-CONDITIONS.resource_within = function(plan, body, test)
-  local found = Works.find_resource(body, test.resource, test.within or 128)
-  return found ~= nil, found and string.format("%.0f tiles", found.distance) or "none"
-end
-
-local function holds(plan, body, condition)
-  if not condition then return true end
-  for name, test in pairs(condition) do
-    local check = CONDITIONS[name]
-    if not check then return false, "I do not know how to check " .. name end
-    local ok_, detail = check(plan, body, test)
-    if not ok_ then return false, detail end
-  end
-  return true
-end
-
 local HANDLERS = {}
 
 -- Labels and jumps: enough control flow to loop "mine a bit, check, mine again"
@@ -137,7 +98,7 @@ end
 
 HANDLERS.jump = function(plan, body, step)
   local target = step.to
-  for index, candidate in pairs(plan.steps) do
+  for index, candidate in ipairs(plan.steps) do
     if candidate["do"] == "label" and candidate.name == target then
       plan.index = index
       plan.step_started = game.tick
@@ -418,7 +379,7 @@ HANDLERS.make = function(plan, body, step)
   end
 
   local inserted = {}
-  for _, entry in pairs(plan_for.mine) do
+  for _, entry in ipairs(plan_for.mine) do
     inserted[#inserted + 1] =
     {
       ["do"] = "mine",
@@ -432,13 +393,13 @@ HANDLERS.make = function(plan, body, step)
   inserted[#inserted + 1] = {["do"] = "craft", item = item, count = count}
 
   -- Splice them in directly after this step.
-  for offset, extra in pairs(inserted) do
+  for offset, extra in ipairs(inserted) do
     table.insert(plan.steps, plan.index + offset, extra)
   end
 
   if #plan_for.mine > 0 then
     local list = {}
-    for _, entry in pairs(plan_for.mine) do
+    for _, entry in ipairs(plan_for.mine) do
       list[#list + 1] = string.format("%d %s", entry.count, entry.name)
     end
     announce(string.format("%d %s needs %s -- digging first.", count, item, table.concat(list, ", ")))
@@ -478,6 +439,80 @@ HANDLERS.craft = function(plan, body, step)
   plan.craft_started = started
   plan.step_started = game.tick
   Body.sign(string.format("crafting %s", item))
+end
+
+-- What is out there, as a report rather than a plan. Cheap, and the first thing
+-- worth saying when you arrive somewhere new.
+HANDLERS.survey = function(plan, body, step)
+  local radius = step.radius or 512
+  local lines = {}
+  for item, source in pairs(Craft.MINEABLE) do
+    local found = Works.find_resource(body, source.resource, radius, source.kind)
+    if found then
+      lines[#lines + 1] = string.format("%s %.0f tiles (%d tiles of it)", item, found.distance, found.tiles)
+    end
+  end
+  table.sort(lines)
+  if #lines == 0 then
+    announce(string.format("nothing I can dig within %d tiles of here.", radius))
+  else
+    announce("within reach: " .. table.concat(lines, ", ") .. ".")
+  end
+  record(plan, "surveyed", tostring(#lines) .. " materials")
+  advance(plan)
+end
+
+-- Walking is how the map grows: a character charts the ground it covers. This
+-- picks the least-visited direction and walks a leg into it.
+HANDLERS.explore = function(plan, body, step)
+  local distance = step.distance or 120
+  local state = storage.crew
+  state.explored = state.explored or {}
+
+  if not plan.explore_target then
+    local least, least_count
+    for heading = 0, 7 do
+      local count = state.explored[heading] or 0
+      if not least_count or count < least_count then least, least_count = heading, count end
+    end
+    state.explored[least] = (state.explored[least] or 0) + 1
+    local angle = least * math.pi / 4
+    plan.explore_target =
+    {
+      x = body.position.x + math.cos(angle) * distance,
+      y = body.position.y + math.sin(angle) * distance,
+    }
+    announce(string.format("having a look %.0f tiles %s.", distance,
+      ({"east", "south-east", "south", "south-west", "west", "north-west", "north", "north-east"})[least + 1]))
+  end
+
+  local dx, dy = body.position.x - plan.explore_target.x, body.position.y - plan.explore_target.y
+  local gap = math.sqrt(dx * dx + dy * dy)
+  if gap <= 8 then
+    Body.halt()
+    Body.sign(nil)
+    record(plan, "explored", string.format("%.0f tiles", distance))
+    plan.explore_target = nil
+    advance(plan)
+    return
+  end
+
+  if not plan.explore_gap or gap < plan.explore_gap - 1 then
+    plan.explore_gap = gap
+    plan.step_started = game.tick
+  elseif game.tick - plan.step_started > 60 * 20 then
+    -- Blocked: that direction is a lake or a cliff face. Take what was charted
+    -- on the way and stop, rather than grinding into it.
+    Body.halt()
+    Body.sign(nil)
+    record(plan, "explored", "as far as I could get")
+    plan.explore_target, plan.explore_gap = nil, nil
+    advance(plan)
+    return
+  end
+
+  Body.sign(string.format("exploring  %.0f tiles to go", gap))
+  Body.walk_to(plan.explore_target)
 end
 
 -- Check the job actually did what it was for. An unattended loop that reports
@@ -705,6 +740,14 @@ script.on_nth_tick(TICK_RATE, function()
     done_once = true
     for _, action in pairs(once) do pcall(action) end
   end
+
+  -- What it does when nobody has asked for anything. Both of these are cheap
+  -- checks and neither of them asks anything outside the game.
+  local running = crew().plan and crew().plan.state == "running"
+  local ok_, err_ = pcall(Personality.steer_research, game.forces.player)
+  if not ok_ then log("crewmate: steer_research failed: " .. tostring(err_)) end
+  ok_, err_ = pcall(Personality.standing_orders, game.forces.player, running)
+  if not ok_ then log("crewmate: standing_orders failed: " .. tostring(err_)) end
   local plan = crew().plan
   if not plan or plan.state ~= "running" then return end
 
@@ -750,7 +793,7 @@ script.on_nth_tick(TICK_RATE, function()
   if not handler then return fail(plan, "I do not know how to " .. tostring(step["do"])) end
 
   -- A step with an unmet condition is simply not this step's turn.
-  local met, detail = holds(plan, body, step["when"])
+  local met, detail = Conditions.hold(plan, body, step["when"])
   if not met then
     record(plan, "skipped", string.format("%s (%s)", step["do"], tostring(detail)))
     advance(plan)

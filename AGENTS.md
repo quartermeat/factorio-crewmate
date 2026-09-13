@@ -36,6 +36,20 @@ mountain of scripted branching first would only be in its way.
 Prefer whatever gets a play test finished. When something needs a decision the
 directive format cannot express, say so rather than inventing machinery for it.
 
+## Personalities
+
+`personalities/*.json` are data like directives: a research path and standing
+orders, nothing else. Two slots, primary and secondary, and the primary is read
+first everywhere. Adding a personality must never mean adding Lua.
+
+## Ordered lists need ipairs
+
+`pairs()` has no defined order. Anywhere "first" means something -- the primary
+personality before the secondary, the research path in order, the search rings from
+smallest outwards, steps being spliced into a plan -- use `ipairs`. This surfaced
+as a test that passed two runs in three, and as a nearest-patch search that was
+only usually nearest.
+
 ## Rules that matter
 
 - Keep the body fair: no cheat mode, no indestructible flag, no conjuring items,

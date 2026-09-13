@@ -7,6 +7,7 @@ local Hands = require("script.hands")
 local Plan = require("script.plan")
 local Works = require("script.works")
 local Craft = require("script.craft")
+local Personality = require("script.personality")
 
 local function ok(value)
   return helpers.table_to_json({ok = true, result = value or {}})
@@ -168,6 +169,26 @@ local interface =
     if not body then return fail("no body in the world") end
     local listed, total = Craft.craftable(body, argument.limit)
     return ok({craftable = listed, total = total})
+  end),
+
+  set_personalities = guarded(function(argument)
+    storage.crew = storage.crew or {}
+    storage.crew.personalities = argument.personalities or {}
+    return ok({known = #(argument.personalities or {})})
+  end),
+
+  personality = guarded(function(argument)
+    if argument.name then
+      local adopted = Personality.adopt(argument.name, argument.slot)
+      if not adopted then return fail("no personality called " .. argument.name) end
+      return ok({adopted = adopted.name, slot = argument.slot or "primary"})
+    end
+    local primary, secondary = Personality.current(), Personality.second()
+    return ok({
+      primary = primary and primary.name or nil,
+      secondary = secondary and secondary.name or nil,
+      known = Personality.known(),
+    })
   end),
 
   catalogue = guarded(function()
@@ -405,6 +426,7 @@ local HELP =
   "/crew do [directive]   -- list directives, or carry one out",
   "/crew mine <ore> [n]   -- go and hand-mine some ore",
   "/crew make [thing] [n] -- list what I can make, or make one",
+  "/crew personality [who] [second] -- who I am; first decides, second fills in",
 }
 
 local function run_command(command)
@@ -437,6 +459,55 @@ local function run_command(command)
   if verb == "do" then return request_directive(player, rest) end
   if verb == "mine" then return request_mining(player, rest) end
   if verb == "make" then return request_making(player, rest) end
+
+  if verb == "personality" or verb == "who" then
+    local first, second = rest:match("^(%S*)%s*(%S*)$")
+    first, second = normalise(first or ""), normalise(second or "")
+
+    if first == "" then
+      local primary, secondary = Personality.current(), Personality.second()
+      if primary then
+        player.print(string.format("[Crew] I am %s%s. %s",
+          primary.title or primary.name,
+          secondary and (", with a bit of " .. (secondary.title or secondary.name)) or "",
+          (primary.voice or {}).greeting or ""))
+      else
+        player.print("[Crew] nobody in particular -- I just do as I am told.")
+      end
+      for _, entry in pairs(Personality.known()) do
+        player.print(string.format("  %s  --  %s", entry.name, entry.title or ""))
+      end
+      player.print("[Crew] /crew personality <who> [second]  --  the first one decides, the second fills in")
+      player.print("[Crew] /crew personality none  --  back to doing only what I am told")
+      return
+    end
+
+    if first == "none" then
+      Personality.forget()
+      player.print("[Crew] right, I will just do as I am told.")
+      return
+    end
+
+    local primary = Personality.adopt(first, "primary")
+    if not primary then
+      player.print("[Crew] I do not know a personality called '" .. first .. "'.")
+      return
+    end
+    if second ~= "" and second ~= "none" then
+      if not Personality.adopt(second, "secondary") then
+        player.print("[Crew] I do not know a personality called '" .. second .. "'.")
+      end
+    elseif second == "none" then
+      Personality.forget("secondary")
+    end
+
+    local secondary = Personality.second()
+    player.print("[Crew] " .. ((primary.voice or {}).greeting or ("I am " .. (primary.title or primary.name) .. " now.")))
+    if secondary then
+      player.print(string.format("[Crew] ...with %s as a sideline.", secondary.title or secondary.name))
+    end
+    return
+  end
 
   local state = Senses.status()
   if state.body and state.body.missing then
