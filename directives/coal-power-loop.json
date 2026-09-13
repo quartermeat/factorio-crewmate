@@ -1,0 +1,116 @@
+{
+  "name": "coal-power-loop",
+  "title": "Coal to steam to electric coal mining",
+  "description": "The bootstrap loop, end to end: a steam power block on the nearest shore, a row of electric mining drills on the nearest coal, a belt from the drills back to the boiler, and a pole run joining the two. Once the boiler has its first coal the loop feeds itself.",
+  "blueprint": "0eNqV082OgyAQAOBXaeY8NiuKVa99DNNs/Jl2SRCM4nYb47vv6KYetjatFwIMfMwQGKDQPTWtMg7SAVRpTQdpNkCnLibX05zJa4IUOkd57ZG5KEMwIihT0Q+k/nhCIOOUU/S3cx7cPk1fF9TyArwLNVWqZ0JT6VpVeo3VBAiN7XizNdNZDIZ7iXCDVMR7OY744ImNXvLCCzZ6/qsEQ1y9sqeFBh/sIFSq5XPncLiiyjfVZJMavan625I9LGxhleaZRzB+wvlixYsXz57P3ZdtyWv6ullj73mK/3A8PdQrj6dXmvkoUaA8YcYtBtzjqHJUTzkvPwJB5wXxL4CjzfXO2V1jr3M539R2MysjkYRJIuMwOnAzjr8SuRMq",
+  "align": "offshore-pump",
+  "parameters": {
+    "drills": {
+      "default": 4,
+      "description": "electric mining drills to put on the coal"
+    },
+    "coal": {
+      "default": 100,
+      "description": "coal to hand-load the boiler with to start it off"
+    },
+    "reach": {
+      "default": 128,
+      "description": "how far to look for a coal patch"
+    },
+    "shore": {
+      "default": 96,
+      "description": "how far from the coal to look for water"
+    }
+  },
+  "supplies": [
+    {
+      "name": "coal",
+      "count": "$coal"
+    },
+    {
+      "name": "electric-mining-drill",
+      "count": "$drills"
+    },
+    {
+      "name": "medium-electric-pole",
+      "count": 30
+    },
+    {
+      "name": "transport-belt",
+      "count": 120
+    },
+    {
+      "name": "inserter",
+      "count": 1
+    }
+  ],
+  "steps": [
+    {
+      "do": "say",
+      "message": "Building the coal loop: drills on the coal, power on the nearest water, a belt between them."
+    },
+    {
+      "do": "find_resource",
+      "resource": "coal",
+      "radius": "$reach",
+      "as": "coal"
+    },
+    {
+      "do": "find_site",
+      "what": "pump_spot",
+      "near": "coal",
+      "radius": "$shore",
+      "as": "shore"
+    },
+    {
+      "do": "stamp",
+      "at": "shore",
+      "align": "offshore-pump",
+      "radius": 24
+    },
+    {
+      "do": "drill_row",
+      "patch": "coal",
+      "resource": "coal",
+      "count": "$drills",
+      "as": "drills"
+    },
+    {
+      "do": "belt_line",
+      "from": "drills_lane_to",
+      "to": "boiler",
+      "belt": "transport-belt",
+      "inserter": "inserter",
+      "limit": 120
+    },
+    {
+      "do": "pole_line",
+      "from": "boiler",
+      "to": "drills",
+      "pole": "medium-electric-pole",
+      "spacing": 7
+    },
+    {
+      "do": "say",
+      "message": "Marked out. Building it now -- this is the long bit."
+    },
+    {
+      "do": "build_ghosts"
+    },
+    {
+      "do": "insert",
+      "into": "boiler",
+      "item": "coal",
+      "count": "$coal"
+    },
+    {
+      "do": "check_power",
+      "from": "steam-engine",
+      "to": "electric-mining-drill"
+    },
+    {
+      "do": "say",
+      "message": "Loop closed: the drills run on steam from the coal they are mining."
+    }
+  ]
+}

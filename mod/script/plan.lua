@@ -4,6 +4,7 @@
 
 local Body = require("script.body")
 local Hands = require("script.hands")
+local Works = require("script.works")
 
 local Plan = {}
 
@@ -52,6 +53,34 @@ local function approach(body, position)
   end
   Body.walk_to(position)
   return false
+end
+
+-- Marks are positions a directive works out as it goes -- where the coal turned
+-- out to be, where the drill row ended up -- so later steps can refer to them by
+-- name instead of carrying coordinates a file could not have known.
+local function mark(plan, name, value)
+  plan.marks = plan.marks or {}
+  plan.marks[name] = value
+end
+
+local function marked(plan, name)
+  return plan.marks and plan.marks[name]
+end
+
+local function site_of(plan, body, padding)
+  local anchor = plan.anchor or body.position
+  padding = padding or 64
+  return {{anchor.x - padding, anchor.y - padding}, {anchor.x + padding, anchor.y + padding}}
+end
+
+-- Marked-out work refers to things that may not be built yet, so a ghost counts.
+local function find_thing(plan, body, name, padding)
+  local area = site_of(plan, body, padding or 96)
+  local built = body.surface.find_entities_filtered{name = name, area = area, force = body.force, limit = 1}[1]
+  if built then return built end
+  for _, candidate in pairs(body.surface.find_entities_filtered{name = "entity-ghost", area = area, force = body.force}) do
+    if candidate.ghost_name == name then return candidate end
+  end
 end
 
 local HANDLERS = {}
@@ -141,7 +170,16 @@ end
 -- building them until none are left.
 -- Stamping is a map-view action: a player marks out a blueprint from anywhere,
 -- and only building it needs boots on the ground.
+local DIRECTION_NAMES = {[0] = "north", [4] = "east", [8] = "south", [12] = "west"}
+
 HANDLERS.stamp = function(plan, body, step)
+  -- "at" may name a mark that an earlier step worked out.
+  if type(step.at) == "string" then
+    local site = marked(plan, step.at)
+    if not site then return fail(plan, "I have not found " .. step.at .. " yet") end
+    step.x, step.y = site.x, site.y
+    step.direction = DIRECTION_NAMES[site.direction] or step.direction
+  end
   local stamped, err = Hands.stamp_aligned(body, step)
   if not stamped then return fail(plan, err) end
   plan.anchor = {x = step.x, y = step.y}
@@ -161,22 +199,18 @@ end
 local REACH_ATTEMPT = 60 * 20
 
 HANDLERS.build_ghosts = function(plan, body, step)
-  local site = plan.site or
-  {
-    {body.position.x - 32, body.position.y - 32},
-    {body.position.x + 32, body.position.y + 32},
-  }
+  local site = plan.site or site_of(plan, body, 128)
   plan.unreachable = plan.unreachable or {}
 
-  local built, reason, position = Hands.build_nearest_ghost(body, site, plan.unreachable, plan.anchor)
+  local built, reason, position, key = Hands.build_nearest_ghost(body, site, plan.unreachable, plan.anchor)
   if built == false then
     Body.halt()
     plan.reaching = nil
     local left = 0
     for _ in pairs(plan.unreachable) do left = left + 1 end
     if reason == "unreachable" and left > 0 then
-      record(plan, "gave up", string.format("%d ghosts I could not get to", left))
-      announce(string.format("built what I could reach; %d pieces are somewhere I cannot walk to.", left))
+      record(plan, "gave up", string.format("%d pieces I could not get to or place", left))
+      announce(string.format("built what I could; %d pieces I could not get to or place.", left))
     else
       record(plan, "built", "site clear")
     end
@@ -185,19 +219,29 @@ HANDLERS.build_ghosts = function(plan, body, step)
   end
 
   if not built then
-    if reason == "walking" then
-      local key = string.format("%.1f,%.1f", position.x, position.y)
-      if plan.reaching and plan.reaching.key == key then
-        if game.tick - plan.reaching.since > REACH_ATTEMPT then
-          plan.unreachable[key] = true
-          plan.reaching = nil
-          record(plan, "skipped", "could not reach " .. key)
-          return
+    if reason == "walking" or reason == "standing" then
+      local where = string.format("%.1f,%.1f", position.x, position.y)
+      if reason == "walking" then
+        if plan.reaching and plan.reaching.key == where then
+          if game.tick - plan.reaching.since > REACH_ATTEMPT then
+            plan.unreachable[where] = true
+            plan.reaching = nil
+            record(plan, "skipped", "could not reach " .. where)
+            return
+          end
+        else
+          plan.reaching = {key = where, since = game.tick}
         end
-      else
-        plan.reaching = {key = key, since = game.tick}
       end
       Body.walk_to(position)
+      return
+    end
+    -- Something took the spot since it was marked out: set that one aside and
+    -- carry on rather than abandoning the job.
+    if key then
+      plan.unreachable[key] = true
+      record(plan, "skipped", reason)
+      plan.step_started = game.tick
       return
     end
     return fail(plan, reason)
@@ -206,6 +250,98 @@ HANDLERS.build_ghosts = function(plan, body, step)
   plan.reaching = nil
   plan.step_started = game.tick -- progress; do not time out mid-site
   record(plan, "built", built)
+end
+
+HANDLERS.find_resource = function(plan, body, step)
+  local found, err = Works.find_resource(body, step.resource, step.radius)
+  if not found then return fail(plan, err) end
+  mark(plan, step.as or step.resource, found.position)
+  record(plan, "found", string.format("%s %.0f tiles away", step.resource, found.distance))
+  announce(string.format("found %s %.0f tiles away.", step.resource, found.distance))
+  advance(plan)
+end
+
+-- Pick the site for a blueprint at run time: the shore nearest the coal, rather
+-- than the shore nearest wherever the body happened to be standing.
+HANDLERS.find_site = function(plan, body, step)
+  local near = step.near and marked(plan, step.near) or body.position
+  if not near then return fail(plan, "I do not know where to look for " .. tostring(step.what)) end
+  local spots = Works.pump_spots(body, near, step.radius, 1)
+  if #spots == 0 then
+    return fail(plan, string.format("no %s within %d tiles of there", step.what or "site", step.radius or 64))
+  end
+  mark(plan, step.as or "site", {x = spots[1].position.x, y = spots[1].position.y, direction = spots[1].direction})
+  record(plan, "found", step.what or "site")
+  advance(plan)
+end
+
+HANDLERS.drill_row = function(plan, body, step)
+  local patch = marked(plan, step.patch or "coal")
+  if not patch then return fail(plan, "I have not found that patch yet") end
+  local row, err = Works.drill_row(body, {
+    patch = patch, resource = step.resource, count = step.count, drill = step.drill,
+  })
+  if not row then return fail(plan, err) end
+  mark(plan, (step.as or "drills") .. "_lane_from", row.lane.from)
+  mark(plan, (step.as or "drills") .. "_lane_to", row.lane.to)
+  mark(plan, step.as or "drills", row.lane.from)
+  plan.site = nil -- the site now spans both ends of the job
+  record(plan, "marked out", string.format("%d drills", row.drills))
+  advance(plan)
+end
+
+HANDLERS.belt_line = function(plan, body, step)
+  local from = marked(plan, step.from)
+  if not from then return fail(plan, "I do not know where to start the belt") end
+  local target = find_thing(plan, body, step.to, step.search)
+  if not target then return fail(plan, "there is no " .. tostring(step.to) .. " to belt into") end
+  local run, err = Works.belt_line(body, {
+    from = from, target = target, belt = step.belt, inserter = step.inserter, limit = step.limit,
+  })
+  if not run then return fail(plan, err) end
+  record(plan, "marked out", string.format("%d belt tiles", run.length))
+  advance(plan)
+end
+
+HANDLERS.pole_line = function(plan, body, step)
+  local from = marked(plan, step.from)
+  local to = marked(plan, step.to)
+  if not from then
+    local entity = find_thing(plan, body, step.from, step.search)
+    from = entity and entity.position
+  end
+  if not (from and to) then return fail(plan, "I do not know where to run the poles between") end
+  local run = Works.pole_line(body, {from = from, to = to, pole = step.pole, spacing = step.spacing})
+  record(plan, "marked out", string.format("%d poles", run.poles))
+  advance(plan)
+end
+
+-- Check the job actually did what it was for. An unattended loop that reports
+-- "done" when the wire never reached is worse than one that admits it.
+HANDLERS.check_power = function(plan, body, step)
+  local area = site_of(plan, body, step.search or 160)
+  local source = body.surface.find_entities_filtered{name = step.from, area = area, force = body.force}[1]
+  local consumers = body.surface.find_entities_filtered{name = step.to, area = area, force = body.force}
+  if not source or #consumers == 0 then
+    return fail(plan, string.format("cannot check the wiring: no %s or no %s got built",
+      tostring(step.from), tostring(step.to)))
+  end
+  local connected, total = 0, #consumers
+  for _, consumer in pairs(consumers) do
+    if consumer.electric_network_id and source.electric_network_id
+      and consumer.electric_network_id == source.electric_network_id then
+      connected = connected + 1
+    end
+  end
+  if connected == 0 then
+    return fail(plan, string.format("the %s are not on the %s's network -- the pole run did not join up",
+      step.to, step.from))
+  end
+  record(plan, "checked", string.format("%d of %d %s powered", connected, total, step.to))
+  if connected < total then
+    announce(string.format("%d of the %d %s are not powered yet.", total - connected, total, step.to))
+  end
+  advance(plan)
 end
 
 HANDLERS.wait = function(plan, body, step)

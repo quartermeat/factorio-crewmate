@@ -113,7 +113,25 @@ avoided where possible: `insert` names an entity (`"into": "boiler"`) and the mo
 finds the one it just built.
 
 The verbs are `say`, `goto`, `stamp`, `build_ghosts`, `insert`, `place`,
-`connect` and `wait`. The mod cannot read files -- Factorio gives runtime scripts
+`connect`, `wait`, and the ones that work things out at run time:
+
+| verb | what it does |
+| --- | --- |
+| `find_resource` | nearest patch of an ore, remembered as a named mark |
+| `find_site` | somewhere a thing will actually fit, near a mark -- a shore for a pump |
+| `drill_row` | the longest unbroken row of drills that has ore under it, with a belt lane and poles |
+| `belt_line` | a two-leg belt run from a mark to an entity, ending in an inserter facing it |
+| `pole_line` | poles close enough together to carry power the whole way |
+| `check_power` | confirms two things ended up on the same electric network |
+
+Marks are how a directive refers to things it could not have known: `find_resource`
+writes one, `drill_row` and `belt_line` read them. `insert` names an entity
+(`"into": "boiler"`) rather than a position, and the mod finds the one it built.
+
+`coal-power-loop` is the whole bootstrap: find coal, find the shore nearest *it*,
+build a steam block, put drills on the coal, belt them back to the boiler, run
+poles between the two, load the boiler, and then check that the drills really are
+on the engines' network before claiming to be done. The mod cannot read files -- Factorio gives runtime scripts
 no way to -- so the bridge compiles a directive into absolute steps and hands the
 whole thing over in one call.
 
@@ -131,6 +149,13 @@ whole thing over in one call.
 - Walking uses the game's pathfinder, with a generous goal radius: shoreline goals
   are often tiles a character cannot stand on, and a path that ends near one is
   just as good.
+- `can_place_entity` ignores ghosts, so two steps can mark out work in the same
+  place and whichever is built first blocks the other. Marking checks footprints
+  for existing ghosts as well.
+- A player who builds where they stand gets shoved aside; a scripted revive just
+  fails. The body steps off a footprint before building it.
+- A directive that reports "done" when the pole run never joined up is worse than
+  one that admits it, which is what `check_power` is for.
 
 ## Iterating
 
@@ -163,12 +188,16 @@ too, but this mod has no data stage, so that rarely comes up.
 - **v0.4 — hands and directives.** Goals defined in data files, carried out
   unsupervised: reach-limited building from its own inventory, ghosts first.
   *Done.*
-- **v0.5 — a sense of place.** Remembers the base: named areas, what it built,
+- **v0.5 — the bootstrap loop.** Coal to steam to electric mining, marked out and
+  built unattended, and checked afterwards. *Done.*
+- **v0.6 — in-game control.** `/crew do <directive>` and `/crew take <item>`, so a
+  directive can be given and supplied without leaving the game.
+- **v0.7 — a sense of place.** Remembers the base: named areas, what it built,
   what it was asked to leave alone.
-- **v0.6 — initiative.** Standing orders it acts on — keep turrets fed, fix the
+- **v0.8 — initiative.** Standing orders it acts on — keep turrets fed, fix the
   brownout, extend the smelter row — and the judgement to ask first when a job is
   bigger than the order.
-- **v0.7 — manners.** An audit log of every action, per-player permissions, and an
+- **v0.9 — manners.** An audit log of every action, per-player permissions, and an
   undo that actually works.
 
 ## Testing

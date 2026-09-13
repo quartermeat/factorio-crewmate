@@ -4,5 +4,6 @@
 require("script.body")
 require("script.senses")
 require("script.hands")
+require("script.works")
 require("script.plan")
 require("script.api")

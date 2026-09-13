@@ -101,7 +101,12 @@ function Hands.insert(body, argument)
   local position = {x = argument.x, y = argument.y}
   if not Hands.within_reach(body, position) then return nil, "out of reach" end
 
-  local target = body.surface.find_entities_filtered{position = position, radius = 1.5, force = body.force}[1]
+  -- Filter by name: a boiler usually has an inserter leaning against it, and the
+  -- nearest entity to the boiler's own position can be the inserter.
+  local target = body.surface.find_entities_filtered
+  {
+    position = position, radius = 1.5, force = body.force, name = argument.into,
+  }[1]
   if not target then
     return nil, string.format("nothing at %.1f,%.1f to put %s into", position.x, position.y, argument.item)
   end
@@ -298,6 +303,26 @@ end
 
 -- Build the nearest ghost that is in reach. Returns the ghost's name on success,
 -- nil plus a reason when it cannot, and false when there is nothing left to do.
+function Hands.footprint(name, position, direction)
+  local prototype = prototypes.entity[name]
+  local width, height = 1, 1
+  if prototype then width, height = prototype.tile_width, prototype.tile_height end
+  if direction == defines.direction.east or direction == defines.direction.west then
+    width, height = height, width
+  end
+  return
+  {
+    left_top = {x = position.x - width / 2, y = position.y - height / 2},
+    right_bottom = {x = position.x + width / 2, y = position.y + height / 2},
+  }
+end
+
+local function standing_on(body, ghost)
+  local box = Hands.footprint(ghost.ghost_name, ghost.position, ghost.direction)
+  return body.position.x > box.left_top.x - 0.6 and body.position.x < box.right_bottom.x + 0.6
+     and body.position.y > box.left_top.y - 0.6 and body.position.y < box.right_bottom.y + 0.6
+end
+
 function Hands.ghost_key(ghost)
   return string.format("%.1f,%.1f", ghost.position.x, ghost.position.y)
 end
@@ -336,13 +361,26 @@ function Hands.build_nearest_ghost(body, area, skip, away_from)
     return nil, "walking", closest.position
   end
 
+  -- A player gets shoved aside when they build where they stand; a scripted
+  -- revive just fails. Step off it first.
+  if standing_on(body, closest) then
+    local dx = body.position.x - closest.position.x
+    local dy = body.position.y - closest.position.y
+    local length = math.max(math.sqrt(dx * dx + dy * dy), 0.1)
+    return nil, "standing", {
+      x = closest.position.x + dx / length * 5,
+      y = closest.position.y + dy / length * 5,
+    }
+  end
+
   local name = closest.ghost_name
   local item = Hands.item_for(name)
   if not item then return nil, "cannot build a " .. tostring(name) end
   if Hands.carrying(body, item) < 1 then return nil, "I have no " .. item end
 
+  local key = Hands.ghost_key(closest)
   local _, built = closest.revive{raise_revive = true}
-  if not built then return nil, "the game refused to build the " .. name end
+  if not built then return nil, "refused: " .. name, nil, key end
   body.get_main_inventory().remove{name = item, count = 1}
   return name
 end

@@ -84,7 +84,8 @@ func (d *Directive) validate() error {
 	for index, step := range d.Steps {
 		verb, _ := step["do"].(string)
 		switch verb {
-		case "say", "goto", "stamp", "build_ghosts", "insert", "place", "connect", "wait":
+		case "say", "goto", "stamp", "build_ghosts", "insert", "place", "connect", "wait",
+			"find_resource", "find_site", "drill_row", "belt_line", "pole_line", "check_power":
 		case "":
 			return fmt.Errorf("step %d has no \"do\"", index+1)
 		default:

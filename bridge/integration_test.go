@@ -275,3 +275,110 @@ func TestIntegrationDirectiveBuildsPowerBlock(t *testing.T) {
 	}
 	t.Logf("built %d engines, %d poles, boiler holding %d coal, steam %.0f", built.Engines, built.Poles, built.Coal, built.Steam)
 }
+
+// The bootstrap loop: power from coal, drills on the coal, a belt between them.
+// The point of the assertions is that the loop actually closes -- the drills are
+// on the same electric network as the engines, and the belt reaches the boiler.
+func TestIntegrationDirectiveClosesTheCoalLoop(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	supply := `/sc local body = game.surfaces.nauvis.find_entities_filtered{name="character"}[1] ` +
+		`body.insert{name="offshore-pump", count=1} body.insert{name="boiler", count=1} body.insert{name="steam-engine", count=3} ` +
+		`body.insert{name="medium-electric-pole", count=40} body.insert{name="electric-mining-drill", count=4} ` +
+		`body.insert{name="transport-belt", count=200} body.insert{name="inserter", count=4} ` +
+		`body.insert{name="coal", count=200} rcon.print("supplied")`
+	if reply, err := game.client.Exec(supply); err != nil || !strings.Contains(reply, "supplied") {
+		t.Fatalf("could not supply the body: %v %q", err, reply)
+	}
+
+	directives, err := LoadDirectives("../directives")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loop := directives["coal-power-loop"]
+	if loop == nil {
+		t.Fatal("coal-power-loop directive is missing")
+	}
+
+	spot, err := loop.FindAnchor(game, nil)
+	if err != nil {
+		t.Fatalf("finding a shore: %v", err)
+	}
+	payload, err := loop.Compile(spot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := game.Call("run_plan", payload); err != nil {
+		t.Fatalf("run_plan: %v", err)
+	}
+
+	var status struct {
+		State string           `json:"state"`
+		Step  int              `json:"step"`
+		Steps int              `json:"steps"`
+		Error string           `json:"error"`
+		Log   []map[string]any `json:"log"`
+	}
+	deadline := time.Now().Add(8 * time.Minute)
+	for time.Now().Before(deadline) {
+		time.Sleep(3 * time.Second)
+		raw, err := game.Call("plan_status", nil)
+		if err != nil {
+			t.Fatalf("plan_status: %v", err)
+		}
+		if err := json.Unmarshal(raw, &status); err != nil {
+			t.Fatalf("plan_status shape: %s", raw)
+		}
+		if status.State != "running" {
+			break
+		}
+	}
+	if status.State != "done" {
+		t.Fatalf("directive did not finish: state=%s step=%d/%d error=%s", status.State, status.Step, status.Steps, status.Error)
+	}
+
+	check := `/sc local s = game.surfaces.nauvis local force = game.forces.player ` +
+		`local engine = s.find_entities_filtered{name="steam-engine", force=force}[1] ` +
+		`local drills = s.find_entities_filtered{name="electric-mining-drill", force=force} ` +
+		`local boiler = s.find_entities_filtered{name="boiler", force=force}[1] ` +
+		`local same = false ` +
+		`if engine and drills[1] and engine.electric_network_id and drills[1].electric_network_id then same = engine.electric_network_id == drills[1].electric_network_id end ` +
+		`rcon.print(helpers.table_to_json{drills=#drills, belts=s.count_entities_filtered{name="transport-belt", force=force}, ` +
+		`inserters=s.count_entities_filtered{name="inserter", force=force}, ` +
+		`fuel=(boiler and boiler.get_fuel_inventory() and boiler.get_fuel_inventory().get_item_count("coal") or 0), ` +
+		`same_network=same})`
+
+	raw, err := game.client.Exec(check)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var built struct {
+		Drills      int  `json:"drills"`
+		Belts       int  `json:"belts"`
+		Inserters   int  `json:"inserters"`
+		Fuel        int  `json:"fuel"`
+		SameNetwork bool `json:"same_network"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &built); err != nil {
+		t.Fatalf("check reply: %s", raw)
+	}
+	t.Logf("drills=%d belts=%d inserters=%d boiler coal=%d one network=%v",
+		built.Drills, built.Belts, built.Inserters, built.Fuel, built.SameNetwork)
+
+	if built.Drills == 0 {
+		t.Fatal("no drills were built on the coal")
+	}
+	if built.Belts == 0 || built.Inserters == 0 {
+		t.Fatal("the drills are not belted back to the boiler")
+	}
+	if !built.SameNetwork {
+		t.Fatal("the drills are not on the engines' electric network: the loop is not closed")
+	}
+}

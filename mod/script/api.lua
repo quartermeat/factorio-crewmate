@@ -5,6 +5,7 @@ local Body = require("script.body")
 local Senses = require("script.senses")
 local Hands = require("script.hands")
 local Plan = require("script.plan")
+local Works = require("script.works")
 
 local function ok(value)
   return helpers.table_to_json({ok = true, result = value or {}})
@@ -111,38 +112,10 @@ local interface =
   -- one thing a directive cannot assume.
   pump_spots = guarded(function(argument)
     local body = Body.get()
-    local surface = body and body.surface or game.surfaces.nauvis
-    local centre = argument.position or (body and body.position) or {x = 0, y = 0}
-    local radius = math.min(argument.radius or 48, 128)
-    local force = game.forces.player
-
-    local spots = {}
-    for x = centre.x - radius, centre.x + radius, 1 do
-      for y = centre.y - radius, centre.y + radius, 1 do
-        for _, direction in pairs({defines.direction.north, defines.direction.east,
-                                   defines.direction.south, defines.direction.west}) do
-          if #spots < (argument.limit or 8) and surface.can_place_entity
-          {
-            name = "offshore-pump", position = {x = x, y = y}, direction = direction,
-            force = force, build_check_type = defines.build_check_type.manual,
-          } then
-            -- can_place_entity answers for the snapped position, not the one it
-            -- was asked about: a pump sits on half tiles. Put a ghost down to
-            -- find out where the game actually means, then take it away again.
-            local ghost = surface.create_entity
-            {
-              name = "entity-ghost", inner_name = "offshore-pump",
-              position = {x = x, y = y}, direction = direction, force = force,
-            }
-            if ghost then
-              spots[#spots + 1] = {position = {x = ghost.position.x, y = ghost.position.y}, direction = direction}
-              ghost.destroy()
-            end
-          end
-        end
-      end
-    end
-    return ok({spots = spots, searched = centre, radius = radius})
+    if not body then return fail("no body in the world") end
+    local centre = argument.position or body.position
+    local spots = Works.pump_spots(body, centre, argument.radius, argument.limit)
+    return ok({spots = spots, searched = centre, radius = argument.radius or 64})
   end),
 
   carrying = guarded(function()
