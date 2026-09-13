@@ -49,14 +49,28 @@ local function ghost(surface, force, name, position, direction)
   }
 end
 
--- The nearest patch of something, as a centre and a rough extent.
+-- The nearest patch of something. Searched in widening rings rather than one big
+-- sweep: find_entities_filtered with a limit returns whatever it comes across
+-- first, not the closest, so a wide search can walk straight past the patch you
+-- are standing on.
 function Works.find_resource(body, name, radius)
   local surface = body.surface
-  local found = surface.find_entities_filtered
-  {
-    position = body.position, radius = radius or 128, name = name, limit = 2000,
-  }
-  if #found == 0 then return nil, string.format("no %s within %d tiles", name, radius or 128) end
+  local reach = radius or 128
+  local found
+
+  for _, ring in pairs({8, 16, 32, 64, 128, 192, 256}) do
+    if ring <= reach + 32 then
+      local candidates = surface.find_entities_filtered
+      {
+        position = body.position, radius = math.min(ring, reach), name = name,
+      }
+      if #candidates > 0 then
+        found = candidates
+        break
+      end
+    end
+  end
+  if not found then return nil, string.format("no %s within %d tiles", name, reach) end
 
   local nearest, nearest_gap
   for _, entity in pairs(found) do
@@ -65,17 +79,22 @@ function Works.find_resource(body, name, radius)
     if not nearest_gap or gap < nearest_gap then nearest, nearest_gap = entity, gap end
   end
 
-  local sum_x, sum_y, count = 0, 0, 0
-  for _, entity in pairs(found) do
-    local dx, dy = entity.position.x - nearest.position.x, entity.position.y - nearest.position.y
-    if dx * dx + dy * dy <= 20 * 20 then
-      sum_x, sum_y, count = sum_x + entity.position.x, sum_y + entity.position.y, count + 1
-    end
+  -- The centre of the patch is worth knowing for laying drills across it; for
+  -- walking over and digging, the near edge is the sensible destination.
+  local patch = surface.find_entities_filtered
+  {
+    position = nearest.position, radius = 24, name = name,
+  }
+  local sum_x, sum_y = 0, 0
+  for _, entity in pairs(patch) do
+    sum_x, sum_y = sum_x + entity.position.x, sum_y + entity.position.y
   end
+
   return
   {
-    position = {x = tile_centre(sum_x / count), y = tile_centre(sum_y / count)},
-    tiles = count,
+    position = {x = nearest.position.x, y = nearest.position.y},
+    centre = {x = math.floor(sum_x / #patch) + 0.5, y = math.floor(sum_y / #patch) + 0.5},
+    tiles = #patch,
     distance = math.sqrt(nearest_gap),
   }
 end

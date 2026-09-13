@@ -123,7 +123,7 @@ func (d *Daemon) start(game *Game, name string, overrides map[string]float64) er
 	if err != nil {
 		return err
 	}
-	payload, err := chosen.Compile(spot, overrides)
+	payload, err := chosen.CompileWith(spot, overrides, known)
 	if err != nil {
 		return err
 	}

@@ -58,7 +58,7 @@
     {
       "do": "find_site",
       "what": "pump_spot",
-      "near": "coal",
+      "near": "coal_centre",
       "radius": "$shore",
       "as": "shore"
     },
@@ -70,7 +70,7 @@
     },
     {
       "do": "drill_row",
-      "patch": "coal",
+      "patch": "coal_centre",
       "resource": "coal",
       "count": "$drills",
       "as": "drills"

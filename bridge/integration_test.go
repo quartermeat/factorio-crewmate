@@ -533,3 +533,145 @@ func TestIntegrationMinesCoalByHand(t *testing.T) {
 	}
 	t.Logf("hand-mined %d coal", coal)
 }
+
+// "Find the closest coal" has to mean the closest, not whichever the engine
+// happened to return first: a limited area search hands back what it comes
+// across, which can be a patch on the far side of one you are standing on.
+func TestIntegrationFindsTheNearestPatch(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+
+	for _, at := range []map[string]int{{"x": 0, "y": 0}, {"x": 80, "y": -60}, {"x": -90, "y": 70}} {
+		if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": at}); err != nil {
+			t.Fatalf("spawn: %v", err)
+		}
+
+		// The truth, computed without a limit over a wide area.
+		truth, err := game.client.Exec(`/sc local s = game.surfaces.nauvis ` +
+			`local b = s.find_entities_filtered{name="character"}[1] ` +
+			`local ore = s.find_entities_filtered{name="coal", position=b.position, radius=256} ` +
+			`local best for _, o in pairs(ore) do ` +
+			`local d = math.sqrt((o.position.x-b.position.x)^2 + (o.position.y-b.position.y)^2) ` +
+			`if not best or d < best then best = d end end ` +
+			`rcon.print(helpers.table_to_json{nearest = best or -1})`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var actual struct {
+			Nearest float64 `json:"nearest"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(truth)), &actual); err != nil {
+			t.Fatalf("truth reply: %s", truth)
+		}
+		if actual.Nearest < 0 {
+			continue // no coal within 256 tiles of this spot; nothing to compare
+		}
+
+		raw, err := game.Call("find_resource", map[string]any{"resource": "coal", "radius": 256})
+		if err != nil {
+			t.Fatalf("find_resource from %v: %v", at, err)
+		}
+		var found struct {
+			Distance float64 `json:"distance"`
+			Tiles    int     `json:"tiles"`
+		}
+		if err := json.Unmarshal(raw, &found); err != nil {
+			t.Fatalf("find_resource shape: %s", raw)
+		}
+		if found.Distance > actual.Nearest+0.5 {
+			t.Fatalf("from %v it found coal %.1f tiles away when there is some at %.1f",
+				at, found.Distance, actual.Nearest)
+		}
+		t.Logf("from %v: nearest coal %.1f tiles away, patch of %d", at, found.Distance, found.Tiles)
+	}
+}
+
+// Deciding what to do next from its own inventory: stock-coal checks, digs if it
+// is short, checks again, and stops when it is not. Nothing outside the game is
+// consulted at any point.
+func TestIntegrationConditionsDecideWhatHappens(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+	if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+		t.Fatal(err)
+	}
+
+	known, err := LoadDirectives("../directives")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stock := known["stock-coal"]
+
+	run := func(amount float64) (string, []map[string]any) {
+		t.Helper()
+		payload, err := stock.CompileWith(Spot{}, map[string]float64{"amount": amount}, known)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := game.Call("run_plan", payload); err != nil {
+			t.Fatalf("run_plan: %v", err)
+		}
+		var status struct {
+			State string           `json:"state"`
+			Error string           `json:"error"`
+			Log   []map[string]any `json:"log"`
+		}
+		deadline := time.Now().Add(3 * time.Minute)
+		for time.Now().Before(deadline) {
+			time.Sleep(2 * time.Second)
+			raw, err := game.Call("plan_status", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			json.Unmarshal(raw, &status)
+			if status.State != "running" {
+				break
+			}
+		}
+		if status.State != "done" {
+			t.Fatalf("stock-coal(%v) did not finish: %s %s", amount, status.State, status.Error)
+		}
+		return status.State, status.Log
+	}
+
+	carrying := func(item string) int {
+		t.Helper()
+		raw, err := game.Call("carrying", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pockets struct {
+			Carrying []struct {
+				Name  string `json:"name"`
+				Count int    `json:"count"`
+			} `json:"carrying"`
+		}
+		json.Unmarshal(raw, &pockets)
+		for _, stack := range pockets.Carrying {
+			if stack.Name == item {
+				return stack.Count
+			}
+		}
+		return 0
+	}
+
+	// Short of coal: it should go and dig until it is not.
+	run(8)
+	if got := carrying("coal"); got < 8 {
+		t.Fatalf("asked for 8 coal, came back with %d", got)
+	}
+
+	// Already stocked: the same directive should decide there is nothing to do.
+	// Every included step is guarded, so none of them should even look for a patch.
+	_, second := run(5)
+	for _, entry := range second {
+		if entry["outcome"] == "found" || entry["outcome"] == "mined" {
+			t.Fatalf("it already had enough coal and went digging anyway: %v", second)
+		}
+	}
+	t.Logf("dug when short (%d coal), did nothing when stocked", carrying("coal"))
+}

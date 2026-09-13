@@ -299,7 +299,7 @@ func runDirective(game *Game, arguments map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	payload, err := chosen.Compile(spot, overrides)
+	payload, err := chosen.CompileWith(spot, overrides, known)
 	if err != nil {
 		return "", err
 	}

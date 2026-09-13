@@ -85,7 +85,8 @@ func (d *Directive) validate() error {
 		verb, _ := step["do"].(string)
 		switch verb {
 		case "say", "goto", "stamp", "build_ghosts", "insert", "place", "connect", "wait",
-			"find_resource", "find_site", "drill_row", "belt_line", "pole_line", "check_power", "mine":
+			"find_resource", "find_site", "drill_row", "belt_line", "pole_line", "check_power", "mine",
+			"label", "jump", "include":
 		case "":
 			return fmt.Errorf("step %d has no \"do\"", index+1)
 		default:
@@ -123,6 +124,34 @@ func (d *Directive) resolve(value any, parameters map[string]float64) any {
 	}
 }
 
+// Rewrite "$inner" to "$outer" so the including directive's parameters win.
+func (d *Directive) rename(value any, aliases map[string]string) any {
+	if len(aliases) == 0 {
+		return value
+	}
+	switch typed := value.(type) {
+	case string:
+		if name, found := strings.CutPrefix(typed, "$"); found {
+			if alias, aliased := aliases[name]; aliased {
+				return alias
+			}
+		}
+		return typed
+	case map[string]any:
+		for key, nested := range typed {
+			typed[key] = d.rename(nested, aliases)
+		}
+		return typed
+	case []any:
+		for index, nested := range typed {
+			typed[index] = d.rename(nested, aliases)
+		}
+		return typed
+	default:
+		return value
+	}
+}
+
 func (d *Directive) settings(overrides map[string]float64) map[string]float64 {
 	values := map[string]float64{}
 	for name, parameter := range d.Parameters {
@@ -134,14 +163,86 @@ func (d *Directive) settings(overrides map[string]float64) map[string]float64 {
 	return values
 }
 
+// A directive can be built out of other directives: `include` pulls another
+// one's steps in where it stands, which is how small reliable jobs add up to
+// bigger ones without any of them needing to know about the others.
+func (d *Directive) expand(all map[string]*Directive, depth int) ([]map[string]any, error) {
+	if depth > 4 {
+		return nil, fmt.Errorf("%s: directives are included too deeply", d.Name)
+	}
+	expanded := make([]map[string]any, 0, len(d.Steps))
+	for _, step := range d.Steps {
+		verb, _ := step["do"].(string)
+		if verb != "include" {
+			expanded = append(expanded, step)
+			continue
+		}
+		name, _ := step["directive"].(string)
+		included, found := all[name]
+		if !found {
+			return nil, fmt.Errorf("%s includes %q, which does not exist", d.Name, name)
+		}
+		inner, err := included.expand(all, depth+1)
+		if err != nil {
+			return nil, err
+		}
+		// Defaults of the included directive, then any values given here. A value
+		// written as "$something" is an alias: it keeps pointing at the including
+		// directive's parameter, so a job can pass its own numbers down.
+		values := included.settings(nil)
+		aliases := map[string]string{}
+		if overrides, given := step["parameters"].(map[string]any); given {
+			for key, value := range overrides {
+				switch typed := value.(type) {
+				case float64:
+					values[key] = typed
+				case string:
+					if strings.HasPrefix(typed, "$") {
+						aliases[key] = typed
+					}
+				}
+			}
+		}
+		// An aliased parameter must not also be filled in from the included
+		// directive's own defaults, or the alias never survives to be resolved.
+		for key := range aliases {
+			delete(values, key)
+		}
+		for _, innerStep := range inner {
+			copied := map[string]any{}
+			for key, value := range innerStep {
+				copied[key] = included.rename(value, aliases)
+			}
+			for key, value := range copied {
+				copied[key] = included.resolve(value, values)
+			}
+			// A condition on the include guards everything it brought in.
+			if condition, carried := step["when"]; carried && copied["when"] == nil {
+				copied["when"] = condition
+			}
+			expanded = append(expanded, copied)
+		}
+	}
+	return expanded, nil
+}
+
 // Compile turns the directive into the payload run_plan expects: steps with real
 // coordinates, the blueprint attached to the step that stamps it, and the
 // supplies the body must already be carrying.
 func (d *Directive) Compile(anchor Spot, overrides map[string]float64) (map[string]any, error) {
+	return d.CompileWith(anchor, overrides, map[string]*Directive{d.Name: d})
+}
+
+func (d *Directive) CompileWith(anchor Spot, overrides map[string]float64, all map[string]*Directive) (map[string]any, error) {
 	parameters := d.settings(overrides)
 
-	steps := make([]map[string]any, 0, len(d.Steps))
-	for _, original := range d.Steps {
+	source, err := d.expand(all, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	steps := make([]map[string]any, 0, len(source))
+	for _, original := range source {
 		step := map[string]any{}
 		for key, value := range original {
 			step[key] = value

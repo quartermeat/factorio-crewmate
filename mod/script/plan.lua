@@ -8,7 +8,8 @@ local Works = require("script.works")
 
 local Plan = {}
 
-local STEP_TIMEOUT = 60 * 60 -- a minute per step before it gives up
+local STEP_TIMEOUT = 60 * 60       -- a minute of no progress before a step gives up
+local BUILD_TIMEOUT = 60 * 60 * 4  -- building a whole site is allowed to take longer
 local TICK_RATE = 15
 
 local function crew()
@@ -83,7 +84,70 @@ local function find_thing(plan, body, name, padding)
   end
 end
 
+-- Conditions: the small checks that let a directive decide what to do next
+-- without asking anyone. Every one of them is a question about the world or the
+-- agent's own pockets, answerable on the spot.
+local CONDITIONS = {}
+
+CONDITIONS.carrying = function(plan, body, test)
+  local item = test.item
+  local count = Hands.carrying(body, item)
+  if test.at_least then return count >= test.at_least, string.format("%d %s", count, item) end
+  if test.less_than then return count < test.less_than, string.format("%d %s", count, item) end
+  return count > 0, string.format("%d %s", count, item)
+end
+
+CONDITIONS.exists = function(plan, body, test)
+  local found = body.surface.count_entities_filtered
+  {
+    name = test.entity,
+    position = body.position,
+    radius = test.within or 64,
+    force = body.force,
+  }
+  if test.at_least then return found >= test.at_least, tostring(found) end
+  return found > 0, tostring(found)
+end
+
+CONDITIONS.resource_within = function(plan, body, test)
+  local found = Works.find_resource(body, test.resource, test.within or 128)
+  return found ~= nil, found and string.format("%.0f tiles", found.distance) or "none"
+end
+
+local function holds(plan, body, condition)
+  if not condition then return true end
+  for name, test in pairs(condition) do
+    local check = CONDITIONS[name]
+    if not check then return false, "I do not know how to check " .. name end
+    local ok_, detail = check(plan, body, test)
+    if not ok_ then return false, detail end
+  end
+  return true
+end
+
 local HANDLERS = {}
+
+-- Labels and jumps: enough control flow to loop "mine a bit, check, mine again"
+-- without anything outside the game deciding anything.
+HANDLERS.label = function(plan, body, step)
+  advance(plan)
+end
+
+HANDLERS.jump = function(plan, body, step)
+  local target = step.to
+  for index, candidate in pairs(plan.steps) do
+    if candidate["do"] == "label" and candidate.name == target then
+      plan.index = index
+      plan.step_started = game.tick
+      plan.jumps = (plan.jumps or 0) + 1
+      if plan.jumps > (step.limit or 500) then
+        return fail(plan, "this directive is going round in circles")
+      end
+      return
+    end
+  end
+  fail(plan, "there is no label called " .. tostring(target))
+end
 
 HANDLERS.say = function(plan, body, step)
   announce(step.message or "")
@@ -232,6 +296,9 @@ HANDLERS.build_ghosts = function(plan, body, step)
             plan.unreachable[where] = true
             plan.reaching = nil
             record(plan, "skipped", "could not reach " .. where)
+            -- Setting one aside is progress: it is the step moving on, not
+            -- the step stalling.
+            plan.step_started = game.tick
             return
           end
         else
@@ -260,9 +327,16 @@ end
 HANDLERS.find_resource = function(plan, body, step)
   local found, err = Works.find_resource(body, step.resource, step.radius)
   if not found then return fail(plan, err) end
+  -- Two marks: the near edge, which is where to walk, and the centre, which is
+  -- where a row of drills wants to sit.
   mark(plan, step.as or step.resource, found.position)
+  mark(plan, (step.as or step.resource) .. "_centre", found.centre)
   record(plan, "found", string.format("%s %.0f tiles away", step.resource, found.distance))
-  announce(string.format("found %s %.0f tiles away.", step.resource, found.distance))
+  if found.distance < 2 then
+    announce(string.format("standing on the %s already -- %d tiles of it.", step.resource, found.tiles))
+  else
+    announce(string.format("nearest %s is %.0f tiles away, %d tiles of it.", step.resource, found.distance, found.tiles))
+  end
   advance(plan)
 end
 
@@ -366,16 +440,15 @@ HANDLERS.mine = function(plan, body, step)
     return
   end
 
-  local centre = marked(plan, step.patch or resource) or body.position
-  local ore = body.surface.find_entities_filtered
-  {
-    name = resource, position = centre, radius = step.radius or 48, limit = 200,
-  }
-  local closest, closest_gap
-  for _, candidate in pairs(ore) do
-    local dx, dy = candidate.position.x - body.position.x, candidate.position.y - body.position.y
-    local gap = dx * dx + dy * dy
-    if not closest_gap or gap < closest_gap then closest, closest_gap = candidate, gap end
+  -- Always swing at the closest ore to where it is standing, widening the search
+  -- only when the near ones are gone.
+  local closest
+  local found = Works.find_resource(body, resource, step.radius or 64)
+  if found then
+    closest = body.surface.find_entities_filtered
+    {
+      name = resource, position = found.position, radius = 1, limit = 1,
+    }[1]
   end
 
   if not closest then
@@ -483,8 +556,10 @@ script.on_nth_tick(TICK_RATE, function()
   local body = Body.get()
   if not body then return fail(plan, "I lost my body") end
 
-  if game.tick - plan.step_started > STEP_TIMEOUT then
-    local step = plan.steps[plan.index]
+  local step = plan.steps[plan.index]
+  local budget = STEP_TIMEOUT
+  if step and step["do"] == "build_ghosts" then budget = BUILD_TIMEOUT end
+  if game.tick - plan.step_started > budget then
     local where = ""
     if step and step["do"] == "build_ghosts" then
       local ghosts = body.surface.find_entities_filtered{name = "entity-ghost", force = body.force, area = plan.site}
@@ -511,11 +586,18 @@ script.on_nth_tick(TICK_RATE, function()
       plan.index, step and step["do"] or "?", where))
   end
 
-  local step = plan.steps[plan.index]
   if not step then return finish(plan) end
 
   local handler = HANDLERS[step["do"] == "goto" and "goto_position" or step["do"]]
   if not handler then return fail(plan, "I do not know how to " .. tostring(step["do"])) end
+
+  -- A step with an unmet condition is simply not this step's turn.
+  local met, detail = holds(plan, body, step["when"])
+  if not met then
+    record(plan, "skipped", string.format("%s (%s)", step["do"], tostring(detail)))
+    advance(plan)
+    return
+  end
 
   local ok, err = pcall(handler, plan, body, step)
   if not ok then fail(plan, tostring(err)) end

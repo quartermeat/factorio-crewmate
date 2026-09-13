@@ -118,7 +118,7 @@ local interface =
     return ok({spots = spots, searched = centre, radius = argument.radius or 64})
   end),
 
-  -- The game cannot read the directive files, so /crew do leaves a request here
+  -- The game cannot read the directive files, so /agent do leaves a request here
   -- and the bridge, which is already running, picks it up and compiles it.
   take_requests = guarded(function()
     local state = storage.crew or {}
@@ -127,7 +127,7 @@ local interface =
     return ok({requests = pending})
   end),
 
-  -- ...and the bridge tells the game what it knows how to do, so /crew do can
+  -- ...and the bridge tells the game what it knows how to do, so /agent do can
   -- list the directives without leaving the game.
   set_catalogue = guarded(function(argument)
     storage.crew = storage.crew or {}
@@ -135,7 +135,7 @@ local interface =
     return ok({known = #(argument.directives or {})})
   end),
 
-  -- The same queue /crew do writes to, reachable from outside the game as well.
+  -- The same queue /agent do writes to, reachable from outside the game as well.
   request = guarded(function(argument)
     if not argument.directive then return fail("which directive?") end
     storage.crew = storage.crew or {}
@@ -146,6 +146,15 @@ local interface =
       parameters = argument.parameters,
     })
     return ok({queued = argument.directive})
+  end),
+
+  -- Where the nearest patch of something is, without committing to anything.
+  find_resource = guarded(function(argument)
+    local body = Body.get()
+    if not body then return fail("no body in the world") end
+    local found, err = Works.find_resource(body, argument.resource or "coal", argument.radius)
+    if not found then return fail(err) end
+    return ok(found)
   end),
 
   catalogue = guarded(function()
@@ -182,20 +191,20 @@ end
 local function hand_over(player, parameter)
   local body = Body.get()
   if not body then
-    player.print("[Crewmate] I have no body here -- /crew come first.")
+    player.print("[Agent] I have no body here -- /agent come first.")
     return
   end
   local name, count = parameter:match("^(%S+)%s*(%d*)$")
   name = normalise(name)
   if not name or not prototypes.item[name] then
-    player.print("[Crewmate] I do not know an item called '" .. tostring(name) .. "'.")
+    player.print("[Agent] I do not know an item called '" .. tostring(name) .. "'.")
     return
   end
 
   local inventory = player.get_main_inventory()
   local available = inventory and inventory.get_item_count(name) or 0
   if available == 0 then
-    player.print("[Crewmate] you are not carrying any " .. name .. ".")
+    player.print("[Agent] you are not carrying any " .. name .. ".")
     return
   end
   local wanted = tonumber(count) or available
@@ -203,11 +212,11 @@ local function hand_over(player, parameter)
 
   local moved = body.insert{name = name, count = wanted}
   if moved == 0 then
-    player.print("[Crewmate] my pockets are full.")
+    player.print("[Agent] my pockets are full.")
     return
   end
   inventory.remove{name = name, count = moved}
-  player.print(string.format("[Crewmate] thanks -- %d %s.", moved, name))
+  player.print(string.format("[Agent] thanks -- %d %s.", moved, name))
 end
 
 local function hand_back(player, parameter)
@@ -224,10 +233,10 @@ local function hand_back(player, parameter)
       given = given + moved
     end
   end
-  player.print(string.format("[Crewmate] handed back %d items.", given))
+  player.print(string.format("[Agent] handed back %d items.", given))
 end
 
--- /crew do queues a directive by name. Nothing here knows what the directives
+-- /agent do queues a directive by name. Nothing here knows what the directives
 -- are; the bridge polls for these and does the rest.
 local function request_directive(player, parameter, parameters)
   storage.crew = storage.crew or {}
@@ -236,12 +245,12 @@ local function request_directive(player, parameter, parameters)
   local name = normalise((parameter or ""):match("^%S+") or "")
   if name == "" then
     if #catalogue == 0 then
-      player.print("[Crewmate] I have no directives loaded -- is the bridge running?")
+      player.print("[Agent] I have no directives loaded -- is the bridge running?")
       return
     end
-    player.print("[Crewmate] I know how to:")
+    player.print("[Agent] I know how to:")
     for _, entry in pairs(catalogue) do
-      player.print(string.format("  /crew do %s  --  %s", entry.name, entry.title or ""))
+      player.print(string.format("  /agent do %s  --  %s", entry.name, entry.title or ""))
     end
     return
   end
@@ -251,23 +260,23 @@ local function request_directive(player, parameter, parameters)
     if entry.name == name then known = true end
   end
   if not known and #catalogue > 0 then
-    player.print("[Crewmate] I do not know a directive called '" .. name .. "'. Try /crew do.")
+    player.print("[Agent] I do not know a directive called '" .. name .. "'. Try /agent do.")
     return
   end
 
   storage.crew.requests = storage.crew.requests or {}
   table.insert(storage.crew.requests,
     {directive = name, player = player.name, tick = game.tick, parameters = parameters})
-  player.print("[Crewmate] right -- " .. name .. ". Give me a moment to work out where.")
+  player.print("[Agent] right -- " .. name .. ". Give me a moment to work out where.")
 end
 
--- /crew mine coal 200 is /crew do mine-coal with an amount: the common case
+-- /agent mine coal 200 is /agent do mine-coal with an amount: the common case
 -- deserves the shorter sentence.
 local function request_mining(player, parameter)
   local resource, amount = parameter:match("^(%S*)%s*(%d*)$")
   resource = normalise(resource or "")
   if resource == "" then
-    player.print("[Crewmate] mine what? Try /crew mine coal 200.")
+    player.print("[Agent] mine what? Try /agent mine coal 200.")
     return
   end
   local parameters = {}
@@ -277,16 +286,16 @@ end
 
 local HELP =
 {
-  "/crew            -- where I am and what I am doing",
-  "/crew come       -- spawn me if needed and follow you",
-  "/crew stop       -- stand still and drop whatever directive I am on",
-  "/crew take <item> [n]  -- hand me some of your items",
-  "/crew give [item]      -- hand them back",
-  "/crew do [directive]   -- list directives, or carry one out",
-  "/crew mine <ore> [n]   -- go and hand-mine some ore",
+  "/agent            -- where I am and what I am doing",
+  "/agent come       -- spawn me if needed and follow you",
+  "/agent stop       -- stand still and drop whatever directive I am on",
+  "/agent take <item> [n]  -- hand me some of your items",
+  "/agent give [item]      -- hand them back",
+  "/agent do [directive]   -- list directives, or carry one out",
+  "/agent mine <ore> [n]   -- go and hand-mine some ore",
 }
 
-commands.add_command("crew", "Crewmate: /crew help for what it understands.", function(command)
+local function run_command(command)
   local player = game.get_player(command.player_index)
   if not player then return end
   local parameter = command.parameter or ""
@@ -300,14 +309,14 @@ commands.add_command("crew", "Crewmate: /crew help for what it understands.", fu
   if verb == "come" then
     if not Body.get() then Body.ensure(player.force) end
     interface.follow({player = player.index})
-    player.print("[Crewmate] on my way.")
+    player.print("[Agent] on my way.")
     return
   end
 
   if verb == "stop" then
     Plan.cancel()
     Body.halt()
-    player.print("[Crewmate] stopped.")
+    player.print("[Agent] stopped.")
     return
   end
 
@@ -318,18 +327,23 @@ commands.add_command("crew", "Crewmate: /crew help for what it understands.", fu
 
   local state = Senses.status()
   if state.body and state.body.missing then
-    player.print("[Crewmate] no body in the world -- /crew come.")
+    player.print("[Agent] no body in the world -- /agent come.")
     return
   end
-  player.print(string.format("[Crewmate] %s at %.0f,%.0f, %s.",
+  player.print(string.format("[Agent] %s at %.0f,%.0f, %s.",
     state.body.surface, state.body.position.x, state.body.position.y, state.body.doing))
   local plan = Plan.status()
   if plan.state and plan.state ~= "idle" then
-    player.print(string.format("[Crewmate] directive %s: %s, step %d of %d%s",
+    player.print(string.format("[Agent] directive %s: %s, step %d of %d%s",
       plan.name, plan.state, plan.step or 0, plan.steps or 0,
       plan.error and (" -- " .. plan.error) or ""))
   end
-end)
+end
+
+-- Two names for the same thing: /agent is what it is, /crew is what the fingers
+-- already know.
+commands.add_command("agent", "The agent: /agent help for what it understands.", run_command)
+commands.add_command("crew", "The agent: /crew help for what it understands.", run_command)
 
 script.on_init(function()
   storage.crew = {}

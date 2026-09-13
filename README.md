@@ -1,11 +1,11 @@
 # Crewmate
 
-An AI-controlled companion that plays Factorio with you. Not a puppet of your
+A scripted agent that plays Factorio alongside you. Not a puppet of your
 character and not a god-mode console script: a `character` entity standing in
-your world with a nametag over its head, that walks, talks, watches the factory,
-and — as it grows — builds. Its instructions arrive over RCON from a language
-model instead of from a keyboard, and it is otherwise bound by the same rules you
-are.
+your world with a nametag over its head -- **Agent** -- that walks, talks, watches
+the factory and builds. It runs directives: small jobs written as data, chained by
+conditions it checks itself. A person or a model can give it one, but neither is
+in the loop while it works.
 
 ## Why it works this way
 
@@ -54,20 +54,22 @@ password to `~/.config/crewmate/env`. It prints the one command you run yourself
 
 ### From inside the game
 
-    /crew                  where it is and what it is doing
-    /crew come             spawn it if needed, and follow you
-    /crew take <item> [n]  hand it some of your items
-    /crew give [item]      have it hand them back
-    /crew do               list the directives it knows
-    /crew do <directive>   carry one out
-    /crew mine <ore> [n]   go and hand-mine some ore
-    /crew stop             stand still, drop the current directive
+`/agent` and `/crew` are the same command.
 
-`/crew take` exists because Factorio has no way to put items into another
+    /agent                  where it is and what it is doing
+    /agent come             spawn it if needed, and follow you
+    /agent take <item> [n]  hand it some of your items
+    /agent give [item]      have it hand them back
+    /agent do               list the directives it knows
+    /agent do <directive>   carry one out
+    /agent mine <ore> [n]   go and hand-mine some ore
+    /agent stop             stand still, drop the current directive
+
+`/agent take` exists because Factorio has no way to put items into another
 character's inventory -- you cannot open one the way you open a chest. It moves
 your own items across, which is the honest version of handing them over.
 
-`/crew do` cannot read the directive files itself, so the mod queues the request
+`/agent do` cannot read the directive files itself, so the mod queues the request
 and the bridge -- already running alongside the server -- notices it, compiles the
 directive and sets it going. A loop, not a conversation.
 
@@ -75,7 +77,7 @@ directive and sets it going. A loop, not a conversation.
     bridge/crewmate serve -save ~/.factorio/saves/your-save.zip
 
 Then join from the game: Multiplayer → Connect to address → `127.0.0.1`. In game,
-`/crew come` puts a body next to you; `/crew` says where it is and what it thinks
+`/agent come` puts a body next to you; `/agent` says where it is and what it thinks
 it is doing.
 
 The server keeps its own write-data directory (`~/.local/share/factorio-crewmate`)
@@ -144,6 +146,28 @@ The verbs are `say`, `goto`, `stamp`, `build_ghosts`, `insert`, `place`,
 | `pole_line` | poles close enough together to carry power the whole way |
 | `check_power` | confirms two things ended up on the same electric network |
 | `mine` | hand-mines a patch until it is carrying enough, or the patch runs out |
+
+### Deciding what to do next
+
+Any step can carry a `when`, and a directive can jump:
+
+```json
+{"do": "label", "name": "check"},
+{"do": "include", "directive": "mine-coal", "parameters": {"amount": "$amount"},
+ "when": {"carrying": {"item": "coal", "less_than": "$amount"}}},
+{"do": "jump", "to": "check",
+ "when": {"carrying": {"item": "coal", "less_than": "$amount"}}}
+```
+
+That is `stock-coal` in full: look in your pockets, dig if short, look again,
+stop when you are not. The conditions are `carrying`, `exists` and
+`resource_within` -- questions about the world or its own inventory, answerable on
+the spot, with nothing consulted outside the game.
+
+`include` pulls another directive's steps in where it stands, so small reliable
+jobs add up into bigger ones without any of them knowing about the others. A
+parameter written `"$amount"` at an include site keeps pointing at the including
+directive's value, so numbers flow down.
 
 Marks are how a directive refers to things it could not have known: `find_resource`
 writes one, `drill_row` and `belt_line` read them. `insert` names an entity
@@ -217,12 +241,14 @@ too, but this mod has no data stage, so that rarely comes up.
   built unattended, and checked afterwards. *Done.*
 - **v0.6 — in-game control.** Give and supply a directive without leaving the
   game. *Done.*
-- **v0.7 — a sense of place.** Remembers the base: named areas, what it built,
+- **v0.7 — scripted decisions.** Conditions, labels, jumps and composition, so a
+  directive decides its own next step. *Done.*
+- **v0.8 — a sense of place.** Remembers the base: named areas, what it built,
   what it was asked to leave alone.
-- **v0.8 — initiative.** Standing orders it acts on — keep turrets fed, fix the
+- **v0.9 — initiative.** Standing orders it acts on — keep turrets fed, fix the
   brownout, extend the smelter row — and the judgement to ask first when a job is
   bigger than the order.
-- **v0.9 — manners.** An audit log of every action, per-player permissions, and an
+- **v0.10 — manners.** An audit log of every action, per-player permissions, and an
   undo that actually works.
 
 ## Testing

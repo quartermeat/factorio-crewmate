@@ -1,0 +1,60 @@
+{
+  "name": "stock-coal",
+  "title": "Keep a stock of coal on hand",
+  "description": "Checks its pockets, and if it is short, goes and mines until it is not. Built out of mine-coal rather than repeating it: a small reliable job, looped on a condition.",
+  "parameters": {
+    "amount": {
+      "default": 100,
+      "description": "how much coal to end up carrying"
+    },
+    "reach": {
+      "default": 128,
+      "description": "how far to look for a patch"
+    }
+  },
+  "steps": [
+    {
+      "do": "label",
+      "name": "check"
+    },
+    {
+      "do": "say",
+      "message": "Short of coal -- going to dig.",
+      "when": {
+        "carrying": {
+          "item": "coal",
+          "less_than": "$amount"
+        }
+      }
+    },
+    {
+      "do": "include",
+      "directive": "mine-coal",
+      "parameters": {
+        "amount": "$amount",
+        "reach": "$reach"
+      },
+      "when": {
+        "carrying": {
+          "item": "coal",
+          "less_than": "$amount"
+        }
+      }
+    },
+    {
+      "do": "jump",
+      "to": "check",
+      "when": {
+        "carrying": {
+          "item": "coal",
+          "less_than": "$amount"
+        }
+      },
+      "limit": 20
+    },
+    {
+      "do": "say",
+      "message": "Coal stocked."
+    }
+  ]
+}

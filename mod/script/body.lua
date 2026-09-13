@@ -4,7 +4,10 @@
 
 local Body = {}
 
-local NAME = "Claude"
+-- Deliberately generic: this is a scripted agent that runs directives on its own.
+-- An operator -- a person, or a model asked for help -- is the exception, not the
+-- thing driving it.
+local NAME = "Agent"
 local COLOR = {r = 0.85, g = 0.55, b = 0.30}
 local ARRIVAL = 1.5      -- tiles; close enough to call it arrived
 local FOLLOW_GAP = 4     -- tiles; how far behind a player it trails
