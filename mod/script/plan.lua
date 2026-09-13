@@ -326,7 +326,7 @@ HANDLERS.build_ghosts = function(plan, body, step)
 end
 
 HANDLERS.find_resource = function(plan, body, step)
-  local found, err = Works.find_resource(body, step.resource, step.radius)
+  local found, err = Works.find_resource(body, step.resource, step.radius, step.kind)
   if not found then return fail(plan, err) end
   -- Two marks: the near edge, which is where to walk, and the centre, which is
   -- where a row of drills wants to sit.
@@ -428,8 +428,25 @@ end
 -- the step alive, so a long dig does not look like a stall.
 HANDLERS.mine = function(plan, body, step)
   local resource = step.resource or "coal"
-  local item = step.item or Hands.product_of(resource)
+  local kind = step.kind -- "type" for things like trees, which have many names
   local target = step.amount or 100
+
+  -- A type search -- "tree" rather than "wood" -- cannot know what it yields
+  -- until it has found one, and asking the inventory for "tree" is an error.
+  local item = step.item
+  if not item then
+    if kind == "type" then
+      local sample = Works.find_resource(body, resource, step.radius or 64, kind)
+      local entity = sample and body.surface.find_entities_filtered
+        {position = sample.position, radius = 1, type = resource, limit = 1}[1]
+      if not entity then
+        return fail(plan, "there is no " .. resource .. " around here")
+      end
+      item = Hands.product_of(entity)
+    else
+      item = Hands.product_of(resource)
+    end
+  end
   local carried = Hands.carrying(body, item)
 
   if carried >= target then
@@ -444,20 +461,16 @@ HANDLERS.mine = function(plan, body, step)
 
   -- Always swing at the closest ore to where it is standing, widening the search
   -- only when the near ones are gone.
-  local closest
-  local found = Works.find_resource(body, resource, step.radius or 64)
-  if found then
-    closest = body.surface.find_entities_filtered
-    {
-      name = resource, position = found.position, radius = 1, limit = 1,
-    }[1]
-  end
+  plan.mine_skip = plan.mine_skip or {}
+  local closest = Works.nearest_minable(body, resource, kind, step.radius or 64, plan.mine_skip)
 
   if not closest then
     Body.sign(nil)
     Hands.stop_mining(body)
     Body.halt()
-    if carried == 0 then return fail(plan, "there is no " .. resource .. " left around here") end
+    if carried == 0 then
+      return fail(plan, "there is no " .. resource .. " around here I can get to")
+    end
     record(plan, "mined", string.format("%d %s, then the patch ran out", carried, item))
     announce(string.format("patch is gone; I got %d %s.", carried, item))
     advance(plan)
@@ -469,16 +482,35 @@ HANDLERS.mine = function(plan, body, step)
     if reason == "walking" then
       Body.sign(nil)
       Hands.stop_mining(body)
+      -- Walking towards it is progress. A patch a couple of hundred tiles away
+      -- is a long stroll, and a stroll is not a stall.
+      local dx, dy = position.x - body.position.x, position.y - body.position.y
+      local gap = math.sqrt(dx * dx + dy * dy)
+      local key = string.format("%.1f,%.1f", position.x, position.y)
+      if not plan.mine_gap or gap < plan.mine_gap - 1 then
+        plan.mine_gap, plan.mine_towards, plan.mine_since = gap, key, game.tick
+        plan.step_started = game.tick
+      elseif plan.mine_towards == key and game.tick - (plan.mine_since or game.tick) > 60 * 15 then
+        -- Fifteen seconds of no ground gained: that one is behind water or a
+        -- cliff. Give up on it specifically and try the next nearest.
+        plan.mine_skip[key] = true
+        plan.mine_gap, plan.mine_towards, plan.mine_since = nil, nil, nil
+        plan.step_started = game.tick
+        record(plan, "skipped", "could not get to " .. key)
+        return
+      end
+      Body.sign(string.format("walking to the %s  %.0f tiles", item, gap))
       Body.walk_to(position)
       return
     end
     return fail(plan, reason)
   end
+  plan.mine_gap = nil
   Body.halt()
 
   -- Say how long this is going to take, once, and then how it is going. Three
   -- minutes of silent standing looks exactly like three minutes of being stuck.
-  local interval_ticks = Hands.mining_ticks(resource)
+  local interval_ticks = Hands.mining_ticks(closest)
   if not plan.mine_started then
     plan.mine_started = true
     plan.mine_announced = carried
@@ -597,6 +629,9 @@ script.on_nth_tick(TICK_RATE, function()
       else
         where = " -- no ghosts left to build, which should have finished the step"
       end
+    elseif step and step["do"] == "mine" then
+      where = string.format(" -- I am at %.0f,%.0f%s", body.position.x, body.position.y,
+        plan.mine_gap and string.format(" and still %.0f tiles short of it", plan.mine_gap) or "")
     elseif step and step.x then
       local dx, dy = body.position.x - step.x, body.position.y - step.y
       where = string.format(" -- I am %.0f tiles from %.0f,%.0f and not getting closer",

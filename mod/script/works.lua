@@ -53,24 +53,25 @@ end
 -- sweep: find_entities_filtered with a limit returns whatever it comes across
 -- first, not the closest, so a wide search can walk straight past the patch you
 -- are standing on.
-function Works.find_resource(body, name, radius)
+-- `what` is a prototype name for ore, or a type such as "tree" when the thing
+-- being looked for comes in a hundred different named varieties.
+function Works.find_resource(body, what, radius, kind)
   local surface = body.surface
   local reach = radius or 128
   local found
 
   for _, ring in pairs({8, 16, 32, 64, 128, 192, 256}) do
     if ring <= reach + 32 then
-      local candidates = surface.find_entities_filtered
-      {
-        position = body.position, radius = math.min(ring, reach), name = name,
-      }
+      local filter = {position = body.position, radius = math.min(ring, reach)}
+      if kind == "type" then filter.type = what else filter.name = what end
+      local candidates = surface.find_entities_filtered(filter)
       if #candidates > 0 then
         found = candidates
         break
       end
     end
   end
-  if not found then return nil, string.format("no %s within %d tiles", name, reach) end
+  if not found then return nil, string.format("no %s within %d tiles", what, reach) end
 
   local nearest, nearest_gap
   for _, entity in pairs(found) do
@@ -83,7 +84,9 @@ function Works.find_resource(body, name, radius)
   -- walking over and digging, the near edge is the sensible destination.
   local patch = surface.find_entities_filtered
   {
-    position = nearest.position, radius = 24, name = name,
+    position = nearest.position, radius = 24,
+    name = kind ~= "type" and what or nil,
+    type = kind == "type" and what or nil,
   }
   local sum_x, sum_y = 0, 0
   for _, entity in pairs(patch) do
@@ -97,6 +100,29 @@ function Works.find_resource(body, name, radius)
     tiles = #patch,
     distance = math.sqrt(nearest_gap),
   }
+end
+
+-- The nearest thing worth swinging at, ignoring any the agent has already given
+-- up on reaching. Rings again, so a big patch does not mean scanning thousands
+-- of tiles every time.
+function Works.nearest_minable(body, what, kind, radius, skip)
+  local surface = body.surface
+  for _, ring in pairs({8, 16, 32, 64, 128, 192, 256}) do
+    if ring <= (radius or 128) + 32 then
+      local filter = {position = body.position, radius = math.min(ring, radius or 128)}
+      if kind == "type" then filter.type = what else filter.name = what end
+      local best, best_gap
+      for _, candidate in pairs(surface.find_entities_filtered(filter)) do
+        local key = string.format("%.1f,%.1f", candidate.position.x, candidate.position.y)
+        if not (skip and skip[key]) then
+          local dx, dy = candidate.position.x - body.position.x, candidate.position.y - body.position.y
+          local gap = dx * dx + dy * dy
+          if not best_gap or gap < best_gap then best, best_gap = candidate, gap end
+        end
+      end
+      if best then return best end
+    end
+  end
 end
 
 local function ore_under(surface, name, centre)

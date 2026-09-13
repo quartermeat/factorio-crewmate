@@ -1,7 +1,7 @@
 {
   "name": "stock-coal",
   "title": "Keep a stock of coal on hand",
-  "description": "Checks its pockets, and if it is short, goes and mines until it is not. Built out of mine-coal rather than repeating it: a small reliable job, looped on a condition.",
+  "description": "Checks its pockets, and if it is short of coal, goes and mines until it is not. Built out of mine-coal rather than repeating it: a small reliable job, looped on a condition.",
   "parameters": {
     "amount": {
       "default": 100,

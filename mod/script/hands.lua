@@ -390,12 +390,14 @@ end
 -- by the same numbers the game would use: the ore's mining time over the
 -- character's mining speed, one unit at a time, and the patch depletes as it
 -- would under a real pair of hands.
-function Hands.mining_ticks(resource)
-  local ore = prototypes.entity[resource]
+-- Timed off whatever is actually being mined: a tree is not a coal tile, and a
+-- rock is neither.
+function Hands.mining_ticks(entity)
+  local prototype = type(entity) == "string" and prototypes.entity[entity] or (entity and entity.prototype)
   local character = prototypes.entity["character"]
   local time = 1
-  if ore and ore.mineable_properties and ore.mineable_properties.mining_time then
-    time = ore.mineable_properties.mining_time
+  if prototype and prototype.mineable_properties and prototype.mineable_properties.mining_time then
+    time = prototype.mineable_properties.mining_time
   end
   local speed = (character and character.mining_speed) or 0.5
   return math.max(6, math.floor(time / speed * 60))
@@ -423,11 +425,13 @@ function Hands.mine_one(body, entity)
   -- Show the animation even though it is not what does the work.
   body.mining_state = {mining = true, position = entity.position}
 
-  if entity.amount and entity.amount > 1 then
+  -- Only resources have an amount to take one unit off; a tree or a rock comes up
+  -- whole, and asking a tree for its amount is an error rather than a nil.
+  if entity.type == "resource" and entity.amount and entity.amount > 1 then
     entity.amount = entity.amount - 1
     inventory.insert{name = product, count = 1}
   elseif not entity.mine{inventory = inventory, raise_destroyed = true} then
-    return nil, "that ore will not come up"
+    return nil, "that " .. entity.name .. " will not come up"
   end
   return true
 end
@@ -439,13 +443,13 @@ end
 -- What a resource turns into when mined, so a directive can say "coal" and mean
 -- both the patch and the item.
 function Hands.product_of(resource)
-  local prototype = prototypes.entity[resource]
-  if not prototype then return resource end
+  local prototype = type(resource) == "string" and prototypes.entity[resource] or (resource and resource.prototype)
+  if not prototype then return tostring(resource) end
   local properties = prototype.mineable_properties
   if properties and properties.products and properties.products[1] then
     return properties.products[1].name
   end
-  return resource
+  return prototype.name
 end
 
 -- What the body is carrying, as a directive's shopping list would describe it.

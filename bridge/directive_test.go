@@ -47,7 +47,7 @@ func TestIncludeExpandsTheOtherDirective(t *testing.T) {
 // including directive's parameter, so numbers flow down.
 func TestIncludeForwardsParameters(t *testing.T) {
 	known := load(t)
-	payload, err := known["stock-coal"].CompileWith(Spot{}, map[string]float64{"amount": 250}, known)
+	payload, err := known["stock-coal"].CompileWith(Spot{}, map[string]any{"amount": float64(250)}, known)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,4 +94,56 @@ func TestDirectivesAllValidate(t *testing.T) {
 			t.Errorf("%s does not compile: %v", name, err)
 		}
 	}
+}
+
+// Every starting material a player can dig by hand should have its own job, and
+// each of them should be the shared gathering directive with the ore filled in.
+func TestEveryStartingMaterialHasADirective(t *testing.T) {
+	known := load(t)
+	wanted := map[string]string{
+		"mine-coal":       "coal",
+		"mine-iron-ore":   "iron-ore",
+		"mine-copper-ore": "copper-ore",
+		"mine-stone":      "stone",
+		"mine-wood":       "tree",
+	}
+	for name, resource := range wanted {
+		directive, found := known[name]
+		if !found {
+			t.Errorf("%s is missing", name)
+			continue
+		}
+		payload, err := directive.CompileWith(Spot{}, nil, known)
+		if err != nil {
+			t.Errorf("%s does not compile: %v", name, err)
+			continue
+		}
+		var mined string
+		for _, step := range payload["steps"].([]map[string]any) {
+			if step["do"] == "mine" {
+				mined, _ = step["resource"].(string)
+			}
+		}
+		if mined != resource {
+			t.Errorf("%s mines %q, expected %q", name, mined, resource)
+		}
+	}
+}
+
+// Amounts given to a wrapper have to reach the gathering steps underneath.
+func TestMaterialDirectivesForwardTheAmount(t *testing.T) {
+	known := load(t)
+	payload, err := known["mine-stone"].CompileWith(Spot{}, map[string]any{"amount": float64(42)}, known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range payload["steps"].([]map[string]any) {
+		if step["do"] == "mine" {
+			if step["amount"] != float64(42) {
+				t.Fatalf("mine-stone asked for 42 stone, step says %v", step["amount"])
+			}
+			return
+		}
+	}
+	t.Fatal("mine-stone has no mine step")
 }

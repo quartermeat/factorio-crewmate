@@ -1,7 +1,7 @@
 {
-  "name": "mine-coal",
-  "title": "Mine coal",
-  "description": "Fuel for boilers, furnaces and burner drills. Hand-mined from the nearest source; coal comes back in its pockets.",
+  "name": "mine-iron-ore",
+  "title": "Mine iron ore",
+  "description": "The one everything else is waiting on. Hand-mined from the nearest source; iron ore comes back in its pockets.",
   "parameters": {
     "amount": {
       "default": 100,
@@ -17,7 +17,7 @@
       "do": "include",
       "directive": "gather",
       "parameters": {
-        "resource": "coal",
+        "resource": "iron-ore",
         "kind": "name",
         "amount": "$amount",
         "reach": "$reach"

@@ -277,16 +277,43 @@ end
 
 -- /crew mine coal 200 is /crew do mine-coal with an amount: the common case
 -- deserves the shorter sentence.
+-- What people actually type, against what the game calls it.
+local ORE_NAMES =
+{
+  iron = "iron-ore",
+  copper = "copper-ore",
+  ["iron-ore"] = "iron-ore",
+  ["copper-ore"] = "copper-ore",
+  coal = "coal",
+  stone = "stone",
+  wood = "wood",
+  tree = "wood",
+  trees = "wood",
+}
+
 local function request_mining(player, parameter)
   local resource, amount = parameter:match("^(%S*)%s*(%d*)$")
   resource = normalise(resource or "")
   if resource == "" then
-    player.print("[Crew] mine what? Try /crew mine coal 200.")
+    player.print("[Crew] mine what? Try /crew mine iron 200. I know coal, iron, copper, stone and wood.")
     return
   end
+
   local parameters = {}
   if tonumber(amount) then parameters.amount = tonumber(amount) end
-  request_directive(player, "mine-" .. resource, parameters)
+
+  local wanted = ORE_NAMES[resource] or resource
+  local catalogue = (storage.crew or {}).catalogue or {}
+  for _, entry in pairs(catalogue) do
+    if entry.name == "mine-" .. wanted then
+      return request_directive(player, "mine-" .. wanted, parameters)
+    end
+  end
+
+  -- Anything else minable still works: gather takes the name straight.
+  parameters.resource = wanted
+  player.print("[Crew] no set job for " .. wanted .. "; I will go and dig some anyway.")
+  request_directive(player, "gather", parameters)
 end
 
 local HELP =

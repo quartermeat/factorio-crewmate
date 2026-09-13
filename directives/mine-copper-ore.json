@@ -1,7 +1,7 @@
 {
-  "name": "mine-coal",
-  "title": "Mine coal",
-  "description": "Fuel for boilers, furnaces and burner drills. Hand-mined from the nearest source; coal comes back in its pockets.",
+  "name": "mine-copper-ore",
+  "title": "Mine copper ore",
+  "description": "Cables, circuits, and the science that needs them. Hand-mined from the nearest source; copper ore comes back in its pockets.",
   "parameters": {
     "amount": {
       "default": 100,
@@ -17,7 +17,7 @@
       "do": "include",
       "directive": "gather",
       "parameters": {
-        "resource": "coal",
+        "resource": "copper-ore",
         "kind": "name",
         "amount": "$amount",
         "reach": "$reach"

@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const version = "0.8.2"
+const version = "0.9.0"
 
 var (
 	address    = flag.String("rcon", "127.0.0.1:27015", "address of the game's RCON port")
@@ -206,7 +206,7 @@ func directive(action, name, overrides string) error {
 	if !found {
 		return fmt.Errorf("no directive called %q", name)
 	}
-	parameters := map[string]float64{}
+	parameters := map[string]any{}
 	if overrides != "" {
 		if err := json.Unmarshal([]byte(overrides), &parameters); err != nil {
 			return fmt.Errorf("parameters are not JSON numbers: %w", err)

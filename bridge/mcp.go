@@ -286,12 +286,10 @@ func runDirective(game *Game, arguments map[string]any) (string, error) {
 		return "", fmt.Errorf("no directive called %q", name)
 	}
 
-	overrides := map[string]float64{}
+	overrides := map[string]any{}
 	if raw, given := arguments["parameters"].(map[string]any); given {
 		for key, value := range raw {
-			if number, ok := value.(float64); ok {
-				overrides[key] = number
-			}
+			overrides[key] = value
 		}
 	}
 

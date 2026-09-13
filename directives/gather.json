@@ -1,0 +1,44 @@
+{
+  "name": "gather",
+  "title": "Go and gather something by hand",
+  "description": "Walks to the nearest patch of whatever it is asked for and hand-mines until it is carrying the amount wanted, or the patch runs out. Every mine-* directive is this one with the resource filled in.",
+  "parameters": {
+    "resource": {
+      "default": "coal",
+      "description": "entity to mine: coal, iron-ore, copper-ore, stone"
+    },
+    "kind": {
+      "default": "name",
+      "description": "\"name\" for an ore, \"type\" for things like trees"
+    },
+    "amount": {
+      "default": 100,
+      "description": "how much to come back with"
+    },
+    "reach": {
+      "default": 128,
+      "description": "how far to look for a patch"
+    }
+  },
+  "steps": [
+    {
+      "do": "find_resource",
+      "resource": "$resource",
+      "kind": "$kind",
+      "radius": "$reach",
+      "as": "patch"
+    },
+    {
+      "do": "mine",
+      "resource": "$resource",
+      "kind": "$kind",
+      "patch": "patch",
+      "amount": "$amount",
+      "radius": "$reach"
+    },
+    {
+      "do": "say",
+      "message": "Done digging."
+    }
+  ]
+}

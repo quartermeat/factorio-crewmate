@@ -147,6 +147,20 @@ The verbs are `say`, `goto`, `stamp`, `build_ghosts`, `insert`, `place`,
 | `check_power` | confirms two things ended up on the same electric network |
 | `mine` | hand-mines a patch until it is carrying enough, or the patch runs out |
 
+### The starting materials
+
+Everything a starting kit can take out of the ground by hand has a job of its own:
+
+    /crew mine coal 200
+    /crew mine iron 100      iron-ore
+    /crew mine copper        copper-ore
+    /crew mine stone
+    /crew mine wood          chopped from the nearest trees
+
+Each is a thin wrapper over `gather`, which takes the resource as a parameter, so
+adding one is four lines of JSON rather than any new code. Anything else minable
+still works -- `/crew mine uranium-ore` goes through `gather` directly.
+
 ### Deciding what to do next
 
 Any step can carry a `when`, and a directive can jump:
@@ -168,6 +182,10 @@ the spot, with nothing consulted outside the game.
 jobs add up into bigger ones without any of them knowing about the others. A
 parameter written `"$amount"` at an include site keeps pointing at the including
 directive's value, so numbers flow down.
+
+Parameters carry strings as well as numbers, which is what lets one directive
+serve five materials. `"kind": "type"` searches by entity type rather than name,
+for things like trees that come in a hundred named varieties.
 
 Marks are how a directive refers to things it could not have known: `find_resource`
 writes one, `drill_row` and `belt_line` read them. `insert` names an entity
@@ -201,6 +219,11 @@ whole thing over in one call.
   fails. The body steps off a footprint before building it.
 - A directive that reports "done" when the pole run never joined up is worse than
   one that admits it, which is what `check_power` is for.
+- Only a `resource` has an `amount`. Asking a tree for one is an error, not a
+  nil, so ore comes up a unit at a time while a tree comes up whole.
+- Ore behind water or a cliff will never be reached, and walking at it forever
+  looks identical to working. Fifteen seconds without gaining ground sets that
+  one aside and tries the next nearest.
 - A character with no player attached will not hold the **mining animation**
   either: the engine clears `mining_state` every tick and re-asserting it does not
   stick. It says what it is doing in text above its head instead, because standing

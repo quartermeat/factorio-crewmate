@@ -480,7 +480,7 @@ func TestIntegrationMinesCoalByHand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := mine.Compile(spot, map[string]float64{"amount": 12})
+	payload, err := mine.CompileWith(spot, map[string]any{"amount": 12}, directives)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -626,7 +626,7 @@ func TestIntegrationConditionsDecideWhatHappens(t *testing.T) {
 
 	run := func(amount float64) (string, []map[string]any) {
 		t.Helper()
-		payload, err := stock.CompileWith(Spot{}, map[string]float64{"amount": amount}, known)
+		payload, err := stock.CompileWith(Spot{}, map[string]any{"amount": amount}, known)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -692,4 +692,83 @@ func TestIntegrationConditionsDecideWhatHappens(t *testing.T) {
 		}
 	}
 	t.Logf("dug when short (%d coal), did nothing when stocked", carrying("coal"))
+}
+
+// Each starting material, actually dug out of a real world. Small amounts: the
+// point is that every one of them works, not how long a hundred takes.
+func TestIntegrationMinesEachStartingMaterial(t *testing.T) {
+	if os.Getenv("CREWMATE_INTEGRATION") == "" {
+		t.Skip("set CREWMATE_INTEGRATION=1 to run against a real Factorio install")
+	}
+	game := hostTestWorld(t)
+	known, err := LoadDirectives("../directives")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, material := range []struct {
+		directive string
+		item      string
+	}{
+		{"mine-coal", "coal"},
+		{"mine-iron-ore", "iron-ore"},
+		{"mine-copper-ore", "copper-ore"},
+		{"mine-stone", "stone"},
+		{"mine-wood", "wood"},
+	} {
+		t.Run(material.directive, func(t *testing.T) {
+			if _, err := game.Call("spawn", map[string]any{"surface": "nauvis", "position": map[string]int{"x": 0, "y": 0}}); err != nil {
+				t.Fatal(err)
+			}
+			payload, err := known[material.directive].CompileWith(Spot{}, map[string]any{"amount": float64(3), "reach": float64(192)}, known)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := game.Call("run_plan", payload); err != nil {
+				t.Fatalf("run_plan: %v", err)
+			}
+
+			var status struct {
+				State string `json:"state"`
+				Error string `json:"error"`
+			}
+			deadline := time.Now().Add(3 * time.Minute)
+			for time.Now().Before(deadline) {
+				time.Sleep(2 * time.Second)
+				raw, err := game.Call("plan_status", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				json.Unmarshal(raw, &status)
+				if status.State != "running" {
+					break
+				}
+			}
+			if status.State != "done" {
+				t.Fatalf("%s did not finish: %s %s", material.directive, status.State, status.Error)
+			}
+
+			raw, err := game.Call("carrying", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var pockets struct {
+				Carrying []struct {
+					Name  string `json:"name"`
+					Count int    `json:"count"`
+				} `json:"carrying"`
+			}
+			json.Unmarshal(raw, &pockets)
+			got := 0
+			for _, stack := range pockets.Carrying {
+				if stack.Name == material.item {
+					got = stack.Count
+				}
+			}
+			if got < 3 {
+				t.Fatalf("%s came back with %d %s", material.directive, got, material.item)
+			}
+			t.Logf("%s: %d %s", material.directive, got, material.item)
+		})
+	}
 }

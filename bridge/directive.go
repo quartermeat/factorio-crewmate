@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -33,9 +32,11 @@ type Anchor struct {
 	Describe string `json:"describe"` // what the spot is, for explaining a failure
 }
 
+// A parameter is usually a number, but "which ore" is a parameter too, so any
+// JSON scalar will do.
 type Parameter struct {
-	Default     float64 `json:"default"`
-	Description string  `json:"description"`
+	Default     any    `json:"default"`
+	Description string `json:"description"`
 }
 
 type Spot struct {
@@ -100,7 +101,7 @@ func (d *Directive) validate() error {
 }
 
 // Values may be written as "$parameter" anywhere a number belongs.
-func (d *Directive) resolve(value any, parameters map[string]float64) any {
+func (d *Directive) resolve(value any, parameters map[string]any) any {
 	switch typed := value.(type) {
 	case string:
 		if name, found := strings.CutPrefix(typed, "$"); found {
@@ -152,8 +153,8 @@ func (d *Directive) rename(value any, aliases map[string]string) any {
 	}
 }
 
-func (d *Directive) settings(overrides map[string]float64) map[string]float64 {
-	values := map[string]float64{}
+func (d *Directive) settings(overrides map[string]any) map[string]any {
+	values := map[string]any{}
 	for name, parameter := range d.Parameters {
 		values[name] = parameter.Default
 	}
@@ -193,14 +194,11 @@ func (d *Directive) expand(all map[string]*Directive, depth int) ([]map[string]a
 		aliases := map[string]string{}
 		if overrides, given := step["parameters"].(map[string]any); given {
 			for key, value := range overrides {
-				switch typed := value.(type) {
-				case float64:
-					values[key] = typed
-				case string:
-					if strings.HasPrefix(typed, "$") {
-						aliases[key] = typed
-					}
+				if text, isText := value.(string); isText && strings.HasPrefix(text, "$") {
+					aliases[key] = text
+					continue
 				}
+				values[key] = value
 			}
 		}
 		// An aliased parameter must not also be filled in from the included
@@ -229,11 +227,11 @@ func (d *Directive) expand(all map[string]*Directive, depth int) ([]map[string]a
 // Compile turns the directive into the payload run_plan expects: steps with real
 // coordinates, the blueprint attached to the step that stamps it, and the
 // supplies the body must already be carrying.
-func (d *Directive) Compile(anchor Spot, overrides map[string]float64) (map[string]any, error) {
+func (d *Directive) Compile(anchor Spot, overrides map[string]any) (map[string]any, error) {
 	return d.CompileWith(anchor, overrides, map[string]*Directive{d.Name: d})
 }
 
-func (d *Directive) CompileWith(anchor Spot, overrides map[string]float64, all map[string]*Directive) (map[string]any, error) {
+func (d *Directive) CompileWith(anchor Spot, overrides map[string]any, all map[string]*Directive) (map[string]any, error) {
 	parameters := d.settings(overrides)
 
 	source, err := d.expand(all, 0)
@@ -343,7 +341,7 @@ func (d *Directive) FindAnchor(game *Game, at *Point) (Spot, error) {
 func (d *Directive) Summary() string {
 	parameters := make([]string, 0, len(d.Parameters))
 	for name, parameter := range d.Parameters {
-		parameters = append(parameters, fmt.Sprintf("%s=%s", name, strconv.FormatFloat(parameter.Default, 'f', -1, 64)))
+		parameters = append(parameters, fmt.Sprintf("%v=%v", name, parameter.Default))
 	}
 	sort.Strings(parameters)
 	line := fmt.Sprintf("%-16s %s", d.Name, d.Title)
