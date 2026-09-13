@@ -17,6 +17,9 @@ going; this file is how to work on it.
 
 ## The shape of the thing
 
+`VISION.md` is the product definition. Preserve its separation between planner,
+automaton, skills, body and world when adding capabilities.
+
 The character is called **Crew**, not after any model, because a model is not
 what drives it. Work belongs in scripted loops, not in a model's context. A directive runs from a
 data file through the mod's own tick handler; nothing calls out to an agent to

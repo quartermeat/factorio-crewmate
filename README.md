@@ -1,11 +1,15 @@
 # Crewmate
 
-A scripted agent that plays Factorio alongside you. Not a puppet of your
-character and not a god-mode console script: a `character` entity standing in
-your world with a nametag over its head -- **Crew** -- that walks, talks, watches
-the factory and builds. It runs directives: small jobs written as data, chained by
-conditions it checks itself. A person or a model can give it one, but neither is
-in the loop while it works.
+An embodied automation runtime that plays Factorio alongside you. It turns an
+intention from a person or software agent into fair, visible, persistent work by
+**Crew**, a `character` standing in the same world as the player. Crew walks,
+talks, watches the factory and builds through directives: automaton scripts made
+from small jobs, conditions and other directives.
+
+A person or model can choose the goal and help with exceptions, but neither has
+to drive the inner loop. The scripts do the work; Factorio's world decides
+whether it succeeded. [VISION.md](VISION.md) defines this boundary and the
+long-term shape of the project.
 
 ## Why it works this way
 
