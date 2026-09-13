@@ -157,6 +157,11 @@ local interface =
     return ok(found)
   end),
 
+  relabel = guarded(function()
+    Body.relabel()
+    return ok({name = Body.NAME})
+  end),
+
   catalogue = guarded(function()
     return ok({directives = (storage.crew or {}).catalogue or {}})
   end),
@@ -351,8 +356,22 @@ end)
 
 -- A body that outlives a save/load is the whole point, but a save made before
 -- the mod was added will not have one yet.
-script.on_configuration_changed(function()
+-- A sign saying "mining coal 28/100" outlives the directive that drew it if the
+-- server stops mid-job, and then hangs over him forever afterwards.
+local function tidy_up()
   storage.crew = storage.crew or {}
+  Body.relabel() -- picks up a rename, among anything else that changed
+  local plan = Plan.status()
+  if plan.state ~= "running" then Body.sign(nil) end
+end
+
+script.on_configuration_changed(tidy_up)
+script.on_load(function()
+  -- on_load cannot touch storage or the world; defer the tidying by a tick.
+  script.on_nth_tick(1, function()
+    script.on_nth_tick(1, nil)
+    tidy_up()
+  end)
 end)
 
 return interface

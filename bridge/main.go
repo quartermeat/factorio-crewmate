@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const version = "0.8.1"
+const version = "0.8.2"
 
 var (
 	address    = flag.String("rcon", "127.0.0.1:27015", "address of the game's RCON port")
