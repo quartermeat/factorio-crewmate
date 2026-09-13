@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -87,7 +89,37 @@ func (d *Daemon) publishCatalogue(game *Game) error {
 	}
 	fmt.Fprintf(os.Stderr, "crewmate: watching for /crew do, %d directives and %d personalities loaded\n",
 		len(listed), len(people))
+	d.warnIfModMoved(game)
 	return nil
+}
+
+// A running server holds the mod version it loaded. Bump the mod on disk without
+// restarting and every client refuses to join -- it sees a version the server has
+// never heard of and goes looking for it on the mod portal, forever. The symptom
+// is a sync loop that says nothing about the cause, so say it here.
+func (d *Daemon) warnIfModMoved(game *Game) {
+	running, err := game.client.Exec(`/sc rcon.print(script.active_mods["crewmate"] or "")`)
+	if err != nil {
+		return
+	}
+	running = strings.TrimSpace(running)
+
+	contents, err := os.ReadFile(filepath.Join(filepath.Dir(d.Directives), "mod", "info.json"))
+	if err != nil {
+		return
+	}
+	var info struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(contents, &info) != nil || info.Version == "" || running == "" {
+		return
+	}
+	if info.Version != running {
+		fmt.Fprintf(os.Stderr,
+			"crewmate: WARNING the mod on disk is %s but this server is running %s -- "+
+				"clients will fail to join and sit in a mod sync loop. Restart the server.\n",
+			info.Version, running)
+	}
 }
 
 func (d *Daemon) serve(game *Game, stop <-chan struct{}, interval time.Duration) {

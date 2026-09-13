@@ -104,7 +104,15 @@ For poking at a live game by hand, `crewmate call <fn> '<json>'` and
 
 ## Versioning
 
-`VERSION`, `mod/info.json` and the `version` constant in `bridge/main.go` move
-together, and every commit carries a `vMAJOR.MINOR.PATCH:` subject and an
-annotated tag. The mod is linked into `~/.factorio/mods/crewmate` without a
-version suffix so a bump does not mean relinking.
+`VERSION` and the `version` constant in `bridge/main.go` move on every commit,
+which carries a `vMAJOR.MINOR.PATCH:` subject and an annotated tag.
+
+**`mod/info.json` moves only when the mod itself changes, and a server restart
+goes with it.** A running server holds the version it loaded; bump the mod on disk
+without restarting and every client refuses to join, sits in a mod sync loop
+looking for a version the portal has never heard of, and is told nothing about
+why. Bridge-only changes leave the mod version alone precisely so that window does
+not exist. The bridge warns at startup when the two have drifted apart.
+
+The mod is linked into `~/.factorio/mods/crewmate` without a version suffix so a
+bump does not mean relinking.
