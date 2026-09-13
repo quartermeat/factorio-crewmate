@@ -601,7 +601,20 @@ function Plan.status()
   }
 end
 
+-- Anything that needs doing once after a load hangs off the tick handler that is
+-- always registered, because registering a new one on load breaks multiplayer.
+local once = {}
+local done_once = false
+
+function Plan.on_first_tick(action)
+  once[#once + 1] = action
+end
+
 script.on_nth_tick(TICK_RATE, function()
+  if not done_once then
+    done_once = true
+    for _, action in pairs(once) do pcall(action) end
+  end
   local plan = crew().plan
   if not plan or plan.state ~= "running" then return end
 

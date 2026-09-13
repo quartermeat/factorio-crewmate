@@ -44,6 +44,15 @@ going the wrong way.
 - New tools need a description that says what the answer is good for, not just
   what the function is called.
 
+## Never register events in on_load
+
+`script.on_load` must not register or unregister handlers (or touch storage). Do
+and the client ends up with a different set of registrations than the save
+recorded, and every join fails with `script-event-mismatch` -- which reads like
+"the mod is not multiplayer safe" and says nothing about the real cause. Work that
+needs doing once after a load goes through `Plan.on_first_tick`, which hangs off a
+handler that is always registered.
+
 ## Two script contexts
 
 `/c` and `/sc` run in the **scenario's** script, not the mod's: `storage` there is

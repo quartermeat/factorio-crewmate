@@ -393,12 +393,11 @@ local function tidy_up()
 end
 
 script.on_configuration_changed(tidy_up)
-script.on_load(function()
-  -- on_load cannot touch storage or the world; defer the tidying by a tick.
-  script.on_nth_tick(1, function()
-    script.on_nth_tick(1, nil)
-    tidy_up()
-  end)
-end)
+
+-- Deliberately NOT script.on_load: registering an event handler there leaves the
+-- client with a different set of registrations than the save recorded, and
+-- Factorio refuses the join with a script-event-mismatch. The tidying happens on
+-- the first tick of the handler that is always registered instead -- see plan.lua.
+Plan.on_first_tick(tidy_up)
 
 return interface
