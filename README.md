@@ -75,6 +75,7 @@ directive and sets it going. A loop, not a conversation.
 
 
     bridge/crewmate serve -save ~/.factorio/saves/your-save.zip
+    bridge/crewmate stop      # stops that server and nothing else
 
 Then join from the game: Multiplayer → Connect to address → `127.0.0.1`. In game,
 `/crew come` puts a body next to you; `/crew` says where it is and what it thinks
@@ -287,6 +288,15 @@ The integration test needs a Factorio install and takes about seven seconds. It
 runs against a throwaway map in a temp directory and never touches `~/.factorio`.
 
 ## Gotchas worth knowing
+
+- **Never register an event handler in `script.on_load`.** The client ends up with
+  a different set of registrations than the save recorded, and every join fails
+  with `script-event-mismatch` -- which a player reads as "this mod is not
+  multiplayer safe". Work that needs doing once after a load hangs off a handler
+  that is always registered.
+- Stop a server with `crewmate stop`, not by killing whatever matches
+  `start-server`: the pattern also matches test servers and any other game you
+  have running.
 
 - The first console command on a save answers Factorio's "this disables
   achievements" prompt instead of running, and says so only in the server log. The

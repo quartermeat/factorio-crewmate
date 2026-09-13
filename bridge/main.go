@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const version = "0.9.1"
+const version = "0.9.2"
 
 var (
 	address    = flag.String("rcon", "127.0.0.1:27015", "address of the game's RCON port")
@@ -75,6 +75,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `crewmate %s -- a bridge between an agent and a running Factorio game.
 
   crewmate serve          host the save as a server with RCON open, so a client can join it
+  crewmate stop           stop the server this bridge started, and nothing else
   crewmate serve -watch mod   the same, restarting on every mod edit
   crewmate mcp            run as an MCP server on stdio, for Claude Code to drive
   crewmate directive list     what the companion knows how to build
@@ -127,6 +128,8 @@ func main() {
 	switch command {
 	case "serve":
 		err = serve()
+	case "stop":
+		err = stopServer()
 	case "mcp":
 		err = withGame(ServeMCP)
 	case "directive":
@@ -321,7 +324,10 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "crewmate: hosting %s, rcon on %s; join at 127.0.0.1\n", filepath.Base(*save), *address)
+	rememberPid(game.Process.Pid)
+	defer os.Remove(pidFile())
+	fmt.Fprintf(os.Stderr, "crewmate: hosting %s (pid %d), rcon on %s; join at 127.0.0.1\n",
+		filepath.Base(*save), game.Process.Pid, *address)
 
 	// Watch for directives asked for from inside the game, for as long as the
 	// server is up.
@@ -357,6 +363,7 @@ func serve() error {
 			if err != nil {
 				return err
 			}
+			rememberPid(game.Process.Pid)
 			go func() { done <- game.Wait() }()
 			fmt.Fprintln(os.Stderr, "crewmate: back up")
 		}
@@ -427,6 +434,45 @@ func snapshot(directory string) map[string]time.Time {
 		return nil
 	})
 	return files
+}
+
+// A pid file, so stopping this server does not mean hunting for factorio
+// processes and killing whatever matches -- which will happily take out a test
+// run, or somebody else's game, along with it.
+func pidFile() string {
+	return filepath.Join(*data, "server.pid")
+}
+
+func rememberPid(pid int) {
+	os.WriteFile(pidFile(), []byte(strconv.Itoa(pid)), 0o644)
+}
+
+func stopServer() error {
+	contents, err := os.ReadFile(pidFile())
+	if err != nil {
+		return fmt.Errorf("no server started from here is running (%s)", pidFile())
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(contents)))
+	if err != nil {
+		return fmt.Errorf("%s does not hold a process id", pidFile())
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		os.Remove(pidFile())
+		return fmt.Errorf("server %d is already gone", pid)
+	}
+	fmt.Fprintf(os.Stderr, "crewmate: asked server %d to stop\n", pid)
+	for attempt := 0; attempt < 60; attempt++ {
+		time.Sleep(250 * time.Millisecond)
+		if err := process.Signal(syscall.Signal(0)); err != nil {
+			os.Remove(pidFile())
+			return nil
+		}
+	}
+	return fmt.Errorf("server %d did not stop", pid)
 }
 
 func serverSettings() []byte {
